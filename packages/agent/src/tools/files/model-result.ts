@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { ToolResult } from '../../extensions';
+import { modelExecutionId, readModelExecutionId } from '../../model-identifier';
 
 type ObjectValue = Record<string, unknown>;
 const object = (value: unknown): ObjectValue | undefined =>
@@ -113,6 +114,16 @@ function knownObservation(value: unknown, kind: 'inspection' | 'lookup'): boolea
         typeof excerpt.truncated === 'boolean'))
   );
 }
+function executionReference(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value || value.length > 256 || value.includes('\0')) return;
+  const encoded = modelExecutionId(value);
+  try {
+    if (readModelExecutionId(encoded) === value) return encoded;
+  } catch {
+    // Invalid optional result metadata is not a model reference.
+  }
+  return undefined;
+}
 function countLines(content: string) {
   if (!content) return 0;
   let lines = 1;
@@ -221,11 +232,13 @@ export function formatFileReadResult({
     selected.fromLine === 1 &&
     selected.nextOffset === null &&
     (selected.toLine === selected.totalLines || selected.totalLines === 0);
+  const execution = executionReference(value.executionId);
   return (
     `Read ${quote(value.path)}; from_line=${selected.fromLine}; lines=${selected.toLine === null ? 'none' : `${selected.fromLine}-${selected.toLine}`}/${selected.totalLines}; next_line=${selected.nextOffset}; ${whole ? 'complete file' : 'selected window only'}.\n` +
     (externalRead && value.baseline === undefined
       ? 'External read-only file; no edit baseline.\n'
       : `${externalRead ? 'External file; outside workspace checkpoints. The reference does not grant write permission.\n' : ''}base_ref=${quote(value.base_ref)}\n`) +
+    (execution === undefined ? '' : `execution_id: ${quote(execution)}\n`) +
     `Content (${Buffer.byteLength(content)} UTF-8 bytes; starts on next line):\n${content}`
   );
 }

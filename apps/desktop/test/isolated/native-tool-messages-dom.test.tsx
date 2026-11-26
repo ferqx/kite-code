@@ -2195,8 +2195,16 @@ test('Native execution labels preserve automatic check, human approval and refus
           </>,
         ),
       );
-      expect(f.host.querySelectorAll(`.tool-approval[aria-label="${item.label}"]`)).toHaveLength(2);
-      expect(f.host.textContent).not.toContain(item.label);
+      if (item.status === 'failed') {
+        const notices = [...f.host.querySelectorAll('.tool-approval')];
+        expect(notices.map((notice) => notice.textContent)).toEqual([item.label, item.label]);
+        expect(f.host.querySelector('[data-status="error"]')).toBeNull();
+      } else {
+        expect(f.host.querySelectorAll(`.tool-approval[aria-label="${item.label}"]`)).toHaveLength(
+          2,
+        );
+        expect(f.host.textContent).not.toContain(item.label);
+      }
       expect(f.host.textContent).not.toContain('等待执行');
       expect(f.host.textContent).not.toContain('执行中');
       if (item.status === 'failed') expect(f.host.textContent).not.toContain('未执行');
@@ -2984,3 +2992,118 @@ for (const [name, long, laterRows] of [
       manager.release();
     }
   });
+
+test('persisted same-file batch companions are neutral without masking real failures', async () => {
+  const leaderId = 'approved-batch-leader';
+  const input = { path: 'shared.ts', find: 'old', replace: 'new' };
+  const fact = (
+    id: string,
+    status: 'failed' | 'outcome_unknown',
+    body: string,
+    details: Record<string, string>,
+    authorization?: Execution['authorization'],
+  ) => {
+    const message = {
+      id,
+      seq: '1',
+      sessionId: 's',
+      runId: 'run',
+      role: 'tool',
+      status: 'complete',
+      toolCallId: id,
+      sourceIds: [id],
+      content: body,
+    } satisfies Message;
+    const record = {
+      id,
+      sessionId: 's',
+      runId: 'run',
+      originStoreId: 'store',
+      kind: 'tool',
+      definitionId: 'files.edit',
+      definitionVersion: '2',
+      status,
+      resultRevision: '1',
+      rootWorkCommandId: 'work',
+      rootWorkSeq: '2',
+      cancelRequestedAt: null,
+      toolCallId: id,
+      toolInput: input,
+      result: { outcome: status, content: body, details },
+      ...(authorization ? { authorization } : {}),
+    } satisfies Execution;
+    const projected = nativeToolMessageFact({
+      execution: record,
+      message,
+      messages: [message],
+      sessionId: 's',
+    });
+    expect(projected).toBeDefined();
+    return desktopToolMessage(projected!, message.id, message.content);
+  };
+  const denial = {
+    kind: 'file_edit_batch@1',
+    leaderExecutionId: leaderId,
+    digest: 'a'.repeat(64),
+    code: 'approval_denied',
+  };
+  const companion = fact('companion', 'failed', 'Original companion receipt', denial);
+  expect(companion).toMatchObject({ status: 'not_executed', settled: true, text: '' });
+  expect(companion.approval).toBeUndefined();
+  const wrong = fact(
+    'other',
+    'failed',
+    'Approval for the file edit batch was denied. This edit was not applied.',
+    {},
+  );
+  expect(wrong.status).toBe('failed');
+  expect(fact('unknown', 'outcome_unknown', 'Unknown effect', denial).status).toBe('unknown');
+  expect(
+    fact('conflict', 'failed', 'Conflict', { ...denial, code: 'file_baseline_conflict' }).status,
+  ).toBe('failed');
+
+  const leader = fact(
+    leaderId,
+    'failed',
+    'approval_denied',
+    { code: 'approval_denied' },
+    {
+      dispatched: false,
+      human: {
+        interactionId: 'batch-card',
+        state: 'answered',
+        revision: '1',
+        acceptedDecisionRevision: null,
+        accepted: false,
+        decision: 'deny',
+      },
+    },
+  );
+  const f = fixture();
+  try {
+    await act(async () =>
+      f.root.render(
+        <>
+          {[leader, companion].map((row) => (
+            <ToolActivity
+              key={row.id}
+              messages={[row]}
+              onToggle={() => {}}
+              renderChildren={() => null}
+              expanded
+              inTrace
+              directTraceDetails
+            />
+          ))}
+        </>,
+      ),
+    );
+    expect([...f.host.querySelectorAll('.tool-approval')].map((node) => node.textContent)).toEqual([
+      '人工审批已拒绝',
+    ]);
+    expect(f.host.querySelector('[data-status="error"], [aria-label="工具异常详情"]')).toBeNull();
+    expect(f.host.textContent).not.toMatch(/未执行|Original companion receipt/);
+  } finally {
+    await f.close();
+  }
+});

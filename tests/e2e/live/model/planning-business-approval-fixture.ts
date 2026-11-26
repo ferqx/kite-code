@@ -61,6 +61,34 @@ export const object = (value: unknown): Record<string, Json> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, Json>)
     : {};
+// Answer the original saved question shape, not an assumed first choice.
+export function ownedApprovalQuestionAnswer(request: Json): Json {
+  const branches = object(object(request).schema).oneOf;
+  const properties = object(object(Array.isArray(branches) ? branches[0] : null).properties);
+  const keys = Object.keys(properties);
+  assert.deepEqual(keys, ['q1'], 'owned_question_must_have_one_answer');
+  const question = object(properties.q1);
+  if (Array.isArray(question.anyOf)) {
+    const approved = question.anyOf
+      .map(object)
+      .find(
+        ({ title, const: id }) =>
+          typeof title === 'string' &&
+          title.trim().toLowerCase() === 'approve' &&
+          typeof id === 'string',
+      );
+    assert(approved?.const, 'owned_question_approve_choice_missing');
+    return { q1: approved.const };
+  }
+  assert(
+    question.type === 'object' &&
+      Array.isArray(question.required) &&
+      question.required.includes('text') &&
+      object(object(question.properties).text).type === 'string',
+    'owned_question_free_text_missing',
+  );
+  return { q1: { text: 'Approve' } };
+}
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const intent = { extensionId: 'builtin.planning', definitionVersion: '1', input: { mode: 'plan' } };
@@ -133,6 +161,7 @@ export function verifyPlanningBusinessEvidence(evidence: PlanningBusinessEvidenc
     entry.actor === 'main' ? 1 : 2,
     'unexpected_grandchild_or_missing_direct_child',
   );
+  let originalChildJobId: string | undefined;
   if (entry.actor !== 'main') {
     const child = evidence.sessions.find((session) => session.id !== 's');
     assert.equal(child?.parentSessionId, 's', 'direct_child_lineage_missing');
@@ -149,6 +178,7 @@ export function verifyPlanningBusinessEvidence(evidence: PlanningBusinessEvidenc
       agent && agent.parentExecutionId === carrier.id && agent.status === 'succeeded',
       'direct_child_carrier_not_terminal',
     );
+    originalChildJobId = agent.id;
   }
   if (!entry.question) {
     assert.equal(object(card.answer).decision, 'approve');
@@ -161,6 +191,19 @@ export function verifyPlanningBusinessEvidence(evidence: PlanningBusinessEvidenc
   assert.equal(shells.length, 1, 'shell_tool_not_unique');
   assert.equal(shells[0]!.status, 'succeeded');
   assert.equal(shells[0]!.authorization?.dispatched, true);
+  if (!entry.question) {
+    const originalEvidenceId = originalChildJobId ?? shells[0]!.id;
+    assert(
+      records.some(
+        (row) =>
+          row.definitionId === 'planning.update' &&
+          row.status === 'succeeded' &&
+          object(row.input).completePlan === true &&
+          object(row.input).executionId === originalEvidenceId,
+      ),
+      'plan_completion_must_use_original_execution',
+    );
+  }
   if (entry.actor === 'explore')
     assert(
       JSON.stringify(shells[0]!.result).includes(evidence.marker.trim()),
@@ -231,7 +274,7 @@ export async function runPlanningBusinessCase(options: {
   const command =
     entry.actor === 'explore'
       ? `cat ${quote(join(workspace, 'source.txt'))}`
-      : `printf %s ${quote(marker)} >> ${quote(target)}`;
+      : `printf ${quote('%s\\n')} ${quote(marker.trimEnd())} >> ${quote(target)}`;
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'business' });
   const steps = new Map<string, number>();
   let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
@@ -329,11 +372,15 @@ export async function runPlanningBusinessCase(options: {
             questions: [
               {
                 question: 'Approve the exact owned effect?',
-                options: [
-                  { label: 'Approve', description: 'Perform the requested effect' },
-                  { label: 'Deny', description: 'Do not perform it' },
-                  { label: 'Defer', description: 'Leave the decision for later' },
-                ],
+                ...(entry.mode === 'full'
+                  ? {}
+                  : {
+                      options: [
+                        { label: 'Approve', description: 'Perform the requested effect' },
+                        { label: 'Deny', description: 'Do not perform it' },
+                        { label: 'Defer', description: 'Leave the decision for later' },
+                      ],
+                    }),
               },
             ],
           },
@@ -391,10 +438,18 @@ export async function runPlanningBusinessCase(options: {
           return { name: 'wait_agent', input: { timeout_ms: 1000 } };
       }
       const rows = await store.listExecutions('s');
+      const spawn = rows.find(
+        (row) => row.definitionId === 'task.spawn' && row.status === 'succeeded',
+      );
       const operation = rows.find(
         (row) =>
-          row.definitionId === (entry.actor === 'main' ? 'shell.execute' : 'task.spawn') &&
-          row.status === 'succeeded',
+          row.status === 'succeeded' &&
+          (entry.actor === 'main'
+            ? row.definitionId === 'shell.execute'
+            : !!spawn &&
+              row.kind === 'job' &&
+              row.parentExecutionId === spawn.id &&
+              row.definitionId === `agent/${entry.actor}`),
       );
       // Preserve the actual failed Tool receipt in the evidence instead of
       // throwing from Bun's test-provider callback before the owner can close.
@@ -701,9 +756,19 @@ export async function runPlanningBusinessCase(options: {
       externalReadScopeDigest: trust.externalReadScopeDigest,
     });
     await setMode(entry.mode);
+    const shellInput = JSON.stringify({
+      cmd: command,
+      filesystem: entry.external ? 'full_access' : 'workspace_write',
+      network: 'none',
+    });
+    const exactShellStep = `Use exec_command with exactly this JSON input: ${shellInput}. Copy the decoded cmd string verbatim; do not re-quote or rewrite the command.`;
+    const completionEvidence =
+      entry.actor === 'main'
+        ? 'copy the original successful exec_command Execution ID verbatim; it is not the numeric shell session_id'
+        : 'call wait_agent for the original child and read its completed event; copy that event’s dispatch_id verbatim (it is the parent Session’s terminal child Job Execution ID), not the child ID or any execution_id quoted inside the child’s result';
     const task = entry.question
-      ? `Before any effect ask me one Approve/Deny question with ask_user. Wait for my original answer. If approved execute exactly ${command} with ${entry.external ? 'full_access' : 'workspace_write'}/no-network. No other command or effect.`
-      : `This is one bounded tool/permission verification. Save a plan with one step effect; request_plan_review for the exact plan version/digest and wait for my answer. Do not choose or change permission mode. After approval ${entry.actor === 'main' ? `execute exactly ${command} with ${entry.external ? 'full_access' : 'workspace_write'}/no-network` : `spawn exactly one ${entry.actor} agent to execute only ${command}; it must ${entry.actor === 'explore' ? 'read only' : 'append exactly once'}, and cannot spawn. Wait for its actual terminal result`}. Complete the plan step using the actual successful original ${entry.actor === 'main' ? 'exec_command' : 'spawn_agent'} execution receipt. The completion execution_id must be the real Execution UUID, never a numeric session_id or an operation key. Use the original receipt visible in context. If its identity is unavailable, report the missing evidence rather than inventing an ID or re-executing the effect. Do not repeat the effect. No other paths, network or effects. Tool/permission results matter; no special final response format is required.`;
+      ? `Before any effect use ask_user for exactly one question about whether to perform this owned test effect. ${entry.mode === 'full' ? 'Make it a free-text question; omit options or use an empty array.' : 'Use three choices Approve, Deny and Defer with a short description each.'} Wait for my original answer. If the choice or free-text answer is Approve, ${exactShellStep} No other command or effect.`
+      : `This is one bounded tool/permission verification. Save a plan with one step whose id is effect; request_plan_review for the exact plan version/digest and wait for my answer. Do not choose or change permission mode. After approval: ${entry.actor === 'main' ? exactShellStep : `spawn exactly one ${entry.actor} agent and tell it: ${exactShellStep} It must ${entry.actor === 'explore' ? 'read only' : 'append exactly once'} and cannot spawn. Wait for its actual terminal result.`} Then use update_plan_progress with step_id:"effect", status:"completed", complete_plan:true, and execution_id from the correct original receipt: ${completionEvidence}. Setting the step completed alone does not complete the plan. If its identity is unavailable, report the missing evidence rather than inventing an ID or re-executing the effect. Do not repeat the effect. No other paths, network or effects. Tool/permission results matter; no special final response format is required.`;
     await client.startRun('s', {
       expectedStoreId,
       commandId: 'work',
@@ -747,18 +812,8 @@ export async function runPlanningBusinessCase(options: {
             let answer:
               | { kind: 'plan_review'; decision: 'approve' }
               | { kind: 'question'; answers: Json } = { kind: 'plan_review', decision: 'approve' };
-            if (card.kind === 'question') {
-              const branch = object((object(object(card.request).schema).oneOf as Json[])[0]);
-              answer = {
-                kind: 'question',
-                answers: Object.fromEntries(
-                  Object.entries(object(branch.properties)).map(([key, value]) => [
-                    key,
-                    object((object(value).anyOf as Json[])[0]).const!,
-                  ]),
-                ),
-              };
-            }
+            if (card.kind === 'question')
+              answer = { kind: 'question', answers: ownedApprovalQuestionAnswer(card.request) };
             await client.answerInteraction(card.presentationSessionId, card.id, {
               expectedStoreId,
               commandId: `answer-${card.id}`,

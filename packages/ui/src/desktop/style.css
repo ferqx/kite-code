@@ -5373,6 +5373,44 @@ body {
 .kite-client .approval-tool-line > .approval-command {
   flex: 1;
 }
+.kite-client .approval-edit-line-counts {
+  display: inline-flex;
+  flex: none;
+  gap: 7px;
+  font: 600 12px / 1.4 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+.kite-client .approval-edit-line-counts > span:first-child {
+  color: var(--success);
+}
+.kite-client .approval-edit-count-description {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.kite-client .approval-edit-list {
+  list-style: none;
+  min-width: 0;
+  max-height: min(24vh, 156px);
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+}
+.kite-client .approval-edit-list > li {
+  padding: 0 2px;
+  height: 26px;
+}
+.kite-client .approval-edit-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--muted-foreground);
+}
 .kite-client .native-approval-group .approval-actions {
   margin-top: 6px;
   height: 28px;
@@ -5394,6 +5432,15 @@ body {
   white-space: nowrap;
   font-size: 11px;
   color: var(--muted-foreground);
+}
+.kite-client.approval-menu {
+  max-width: var(--radix-dropdown-menu-content-available-width);
+}
+.kite-client .approval-scope-option {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .kite-client .approval-session-option {
   display: flex;

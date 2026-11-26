@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   object,
+  ownedApprovalQuestionAnswer,
   planningBusinessCases,
   runPlanningBusinessCase,
   selectPlanningBusinessCases,
@@ -18,6 +19,31 @@ test('planning live selection keeps exact six directions and rejects unknown or 
   expect(selectPlanningBusinessCases('plan-full').map((entry) => entry.id)).toEqual(['plan-full']);
   expect(() => selectPlanningBusinessCases('missing')).toThrow('unknown_case');
   expect(() => selectPlanningBusinessCases('plan-full,plan-full')).toThrow('duplicate_case');
+});
+
+test('owned test answers the original Approve choice by label or the valid free-text schema', () => {
+  type QuestionWireJson = Parameters<typeof ownedApprovalQuestionAnswer>[0];
+  const choice = (q1: QuestionWireJson): QuestionWireJson => ({
+    schema: { oneOf: [{ properties: { q1 } }, { const: null }] },
+  });
+  expect(
+    ownedApprovalQuestionAnswer(
+      choice({
+        anyOf: [
+          { const: 'q1-o1', title: 'Deny' },
+          { const: 'q1-o2', title: 'Approve' },
+        ],
+      }),
+    ),
+  ).toEqual({ q1: 'q1-o2' });
+  expect(
+    ownedApprovalQuestionAnswer(
+      choice({ type: 'object', required: ['text'], properties: { text: { type: 'string' } } }),
+    ),
+  ).toEqual({ q1: { text: 'Approve' } });
+  expect(() =>
+    ownedApprovalQuestionAnswer(choice({ anyOf: [{ const: 'q1-o1', title: 'Deny' }] })),
+  ).toThrow('owned_question_approve_choice_missing');
 });
 
 for (const entry of planningBusinessCases) {

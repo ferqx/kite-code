@@ -1,5 +1,6 @@
 import type { Extension, Json, ToolContext, ToolResult } from '../../extensions';
 import { isWorkerCleanupFailure } from '../../platform/process/owned-worker';
+import { webFetchInitialOrigin, webFetchOriginContract } from './approval';
 import { batchPageText, fetchBatch, webFetchBatchLimits } from './batch';
 import { createPassiveWebExtractor, type WebExtractor } from './extraction';
 import {
@@ -12,6 +13,7 @@ import {
 } from './network';
 import { parseRobots, robotsAllows } from './robots';
 
+export { createWebFetchToolBehavior } from './approval';
 export { webFetchBatchLimits } from './batch';
 export {
   createPassiveWebExtractor,
@@ -111,6 +113,7 @@ export function createWebFetchExtension(options: {
 export function createWebFetchBindingFactory(options: {
   networkPort: WebNetworkPort;
   extractor?: WebExtractor;
+  requireDispatchGrantProof?: boolean;
 }) {
   const state = webState();
   const extractor = options.extractor ?? createPassiveWebExtractor();
@@ -149,7 +152,11 @@ function webState() {
   };
 }
 function createWebFetchDefinition(
-  options: { networkPort: WebNetworkPort; extractor?: WebExtractor },
+  options: {
+    networkPort: WebNetworkPort;
+    extractor?: WebExtractor;
+    requireDispatchGrantProof?: boolean;
+  },
   state: ReturnType<typeof webState>,
   acquireExtractor?: () => WebExtractor,
   batchEnabled = true,
@@ -179,6 +186,7 @@ function createWebFetchDefinition(
     input: { url: string; max_chars?: number; timeout_ms?: number },
     context: ToolContext,
     batch?: { index: number; count: number; signal: AbortSignal },
+    approvedOrigin?: string,
   ): Promise<ToolResult> {
     let initial: URL;
     try {
@@ -221,6 +229,8 @@ function createWebFetchDefinition(
     ) {
       signal.throwIfAborted();
       const parsed = webUrl(url);
+      if (approvedOrigin !== undefined && parsed.origin !== approvedOrigin)
+        throw new WebFetchError('web_grant_origin_changed');
       return requestNetwork.request(
         {
           url,
@@ -324,7 +334,9 @@ function createWebFetchDefinition(
       deadline.signal.throwIfAborted();
       stage = 'queue';
       await throttle(initial.origin, deadline.signal);
-      const cached = robots.get(initial.origin);
+      // A prior once/Full fetch may have followed a cross-origin robots redirect.
+      const robotsKey = approvedOrigin === undefined ? initial.origin : `grant:${approvedOrigin}`;
+      const cached = robots.get(robotsKey);
       let rules = cached && Date.now() - cached.at < 300000 ? cached.rules : undefined;
       if (!rules) {
         let robotTime: ReturnType<typeof timeLimit> | undefined;
@@ -343,14 +355,16 @@ function createWebFetchDefinition(
             )
           ).body;
           rules = parseRobots(body);
-        } catch {
+        } catch (error) {
+          if (error instanceof WebFetchError && error.code === 'web_grant_origin_changed')
+            throw error;
           deadline.signal.throwIfAborted();
           rules = [];
         } finally {
           robotTime?.close();
         }
         if (robots.size >= 200) robots.delete(robots.keys().next().value!);
-        robots.set(initial.origin, { rules, at: Date.now() });
+        robots.set(robotsKey, { rules, at: Date.now() });
       }
       if (!robotsAllows(rules, initial))
         return {
@@ -438,7 +452,10 @@ function createWebFetchDefinition(
       if (known instanceof WebFetchError)
         return {
           outcome: 'failed',
-          content: known.code,
+          content:
+            known.code === 'web_grant_origin_changed'
+              ? 'The page redirected to a different origin, outside the saved authorization. No request was made to the redirected origin.'
+              : known.code,
           details: { code: known.code, stage, resource },
         };
       throw error;
@@ -536,6 +553,30 @@ function createWebFetchDefinition(
             )
           )
             return { outcome: 'failed', content: 'web_input_invalid' };
+          const grant = context.dispatchAuthorization?.acceptedGrant;
+          if (options.requireDispatchGrantProof && grant === undefined)
+            return {
+              outcome: 'failed',
+              content: 'The final web authorization could not be verified. No request was made.',
+              details: { code: 'web_grant_proof_missing' },
+            };
+          const approvedOrigin = grant ? webFetchInitialOrigin(input) : undefined;
+          if (
+            grant &&
+            (grant.contractId !== webFetchOriginContract ||
+              !approvedOrigin ||
+              !grant.scope ||
+              typeof grant.scope !== 'object' ||
+              Array.isArray(grant.scope) ||
+              Object.keys(grant.scope).length !== 1 ||
+              grant.scope.origin !== approvedOrigin)
+          )
+            return {
+              outcome: 'failed',
+              content:
+                'The saved web authorization does not match this request. No request was made.',
+              details: { code: 'web_grant_scope_invalid' },
+            };
           const limits = {
             max_chars: input.max_chars as number | undefined,
             timeout_ms: input.timeout_ms as number | undefined,
@@ -544,7 +585,7 @@ function createWebFetchDefinition(
             if (typeof input.url !== 'string' || !input.url)
               return { outcome: 'failed', content: 'web_input_invalid' };
             context.signal.throwIfAborted();
-            return fetchPage({ ...limits, url: input.url }, context);
+            return fetchPage({ ...limits, url: input.url }, context, undefined, approvedOrigin);
           }
           const urls = input.urls;
           if (
@@ -562,7 +603,12 @@ function createWebFetchDefinition(
           );
           try {
             return await fetchBatch(urls, context, deadline.signal, (url, index, signal) =>
-              fetchPage({ ...limits, url }, context, { index, count: urls.length, signal }),
+              fetchPage(
+                { ...limits, url },
+                context,
+                { index, count: urls.length, signal },
+                approvedOrigin,
+              ),
             );
           } finally {
             deadline.close();

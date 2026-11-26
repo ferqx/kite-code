@@ -57,13 +57,18 @@ export interface ToolResult {
   modelImages?: ArtifactRef[];
 }
 export interface ToolContext extends ActionContext {
+  /** Private by construction: the host derives this from the sealed Model response, not Tool input. */
+  readonly fileEditBatch?: import('../file-edit-batch-plan').FileEditBatchPlan;
   readonly runId: string | null;
   /** Frozen input budget of the model that uses this Tool result, when known. */
   readonly modelInputTokenLimit?: number;
   /** Frozen total host capacities, not free slots or dispatch permission. */
   readonly resourceCapacity: ResourceCapacity;
   /** Final Store-accepted dispatch evidence; this metadata never grants permission itself. */
-  readonly dispatchAuthorization?: JobContext['dispatchAuthorization'];
+  readonly dispatchAuthorization?: NonNullable<JobContext['dispatchAuthorization']> & {
+    /** Scope of the reusable grant validated in the final Store dispatch transaction; null means no grant used. */
+    readonly acceptedGrant?: { readonly contractId: string; readonly scope: Json } | null;
+  };
   reportProgress(update: Json): void;
   /** Persist a question for this exact live attempt and return its accepted information. */
   requestInput(request: Json): Promise<Json>;

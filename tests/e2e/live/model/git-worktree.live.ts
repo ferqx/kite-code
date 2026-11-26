@@ -322,6 +322,7 @@ export async function runGitWorktreeLive(
   let canonical: unknown;
   let finalDirectory: Awaited<ReturnType<typeof executionDirectory>> | undefined;
   let replacement: ReturnType<typeof entity> | undefined;
+  let observedWorktreeKeys: { create: string; remove: string } | undefined;
   try {
     signal.throwIfAborted();
     live = await createLiveModelFixture({
@@ -408,7 +409,11 @@ export async function runGitWorktreeLive(
         shellExecutable: '/bin/sh',
         host: {
           controlBase: control,
-          protectedRoots: [profile.dataRoot, control, evidence],
+          // The canonical private temp is under dataRoot/.coordination. Do not
+          // mask it: the native worker must canonicalize its own TMPDIR before
+          // it can safely rule out temporary targets. Keep this fixture's
+          // sensitive profile, supervisor control and evidence unreadable.
+          protectedRoots: [profile.profilePath, control, evidence],
           readonlyAssets: [join(root, 'assets')],
           runtimeReadOnlyRoots: [dirname(process.execPath)],
         },
@@ -582,11 +587,34 @@ export async function runGitWorktreeLive(
                 (defaultCase && action === 'create'
                   ? !('path' in intent)
                   : intent.path === target) &&
-                intent.key === (action === 'create' ? createKey : removeKey) &&
-                object(intent.permissions).filesystem === 'full_access' &&
-                object(intent.permissions).network === 'none',
+                (selectedCase === 'child-approval'
+                  ? intent.key === undefined &&
+                    intent.filesystem === 'full_access' &&
+                    intent.network === undefined
+                  : intent.key === (action === 'create' ? createKey : removeKey) &&
+                    object(intent.permissions).filesystem === 'full_access' &&
+                    object(intent.permissions).network === 'none'),
               'operator-exact-approved-child-intent',
             );
+            if (selectedCase === 'child-approval') {
+              const options = object(card.request).options;
+              const scopeOption = (Array.isArray(options) ? options : [])
+                .map(object)
+                .find(({ kind }) => kind === 'scope');
+              const scope = object(scopeOption?.scope);
+              check(
+                scopeOption?.contractId === 'builtin.worktree.action-scope' &&
+                  scope.action === action &&
+                  object(scope.repository).root === canonicalSource &&
+                  object(scope.parent).path === dirname(target) &&
+                  object(scope.permissions).filesystem === 'full_access' &&
+                  object(scope.permissions).network === 'none' &&
+                  (action === 'create'
+                    ? scope.baseOid === before.head && scope.branchMode === 'newBranch'
+                    : object(scope.target).path === target),
+                'operator-current-card-must-match-exact-owned-repository-and-scope',
+              );
+            }
             check(
               action !== 'create' ||
                 (intent.newBranch === branch &&
@@ -1289,7 +1317,7 @@ export async function runGitWorktreeLive(
         ? `让唯一一名 explore 只读探索协作者使用实际工作树工具列出仓库登记，核对来源路径 ${JSON.stringify(canonicalSource)}，并解释在这个只读角色中创建或删除工作树需要什么角色与权限。不得创建或删除工作树，不尝试变更；不改文件、不联网。自然说明不能变更的边界，不把只读角色当作用户批准。`
         : defaultCase
           ? `让唯一一名默认可写协作者完成以下准确任务。task.spawn 必须省略 preset，使用当前默认 general，不指定其他角色。传给它的完整任务必须包含：来源 ${JSON.stringify(canonicalSource)}；先实际列出工作树；从默认 HEAD 创建一棵工作树，创建参数必须省略 path，由工具选择默认持久目录，新本地分支 ${JSON.stringify(branch)}，原创建 key ${JSON.stringify(createKey)}，显式权限 filesystem=full_access、network=none；等待真实 create 成功，读取其完整回执，取真实准确 path 正常删除同一目标，原删除 key ${JSON.stringify(removeKey)}，显式同样权限；保留新分支、标签与来源所有 staged/unstaged/untracked/ignored 内容和索引，不改变会话 cwd，不联网、不造报告文件、不再委派。Tool 如需审批由本测试的真实用户/操作员通过原审批卡回答，父子业务 Agent 均不能自行授权，不更换 key 或请求范围绕过。等待真实成功或明确失败再报告。`
-          : `让唯一一名默认可写协作者完成以下准确任务。task.spawn 必须省略 preset，使用当前默认 general，不指定其他角色。传给它的完整任务必须包含：来源 ${JSON.stringify(canonicalSource)}；先实际列出工作树；从默认 HEAD 创建准确目标 ${JSON.stringify(target)}，新本地分支 ${JSON.stringify(branch)}，原创建 key ${JSON.stringify(createKey)}，显式权限 filesystem=full_access、network=none；成功后正常删除同一目标，原删除 key ${JSON.stringify(removeKey)}，显式同样权限；保留新分支、标签与来源所有 staged/unstaged/untracked/ignored 内容和索引，不改变会话 cwd，不使用 Shell、不联网、不造报告文件、不再委派。Tool 和内部 Job 如需审批，由本测试的真实用户/操作员通过原审批卡回答，父子业务 Agent 均不能自行授权，不更换 key 或请求范围绕过。等待真实成功或明确失败再报告。`;
+          : `让唯一一名默认可写协作者完成以下准确任务。task.spawn 必须省略 preset，使用当前默认 general，不指定其他角色。传给它的完整任务必须包含：来源 ${JSON.stringify(canonicalSource)}；先实际列出工作树；从默认 HEAD 创建准确目标 ${JSON.stringify(target)}，新本地分支 ${JSON.stringify(branch)}，仅传当前工具参数，显式请求 filesystem=full_access，Git 禁止联网；成功后正常删除同一准确目标，显式同样文件权限；保留新分支、标签与来源所有 staged/unstaged/untracked/ignored 内容和索引，不改变会话 cwd，不使用 Shell、不联网、不造报告文件、不再委派。Tool 和内部 Job 如需审批，由本测试的真实用户/操作员通过原审批卡回答，父子业务 Agent 均不能自行授权，不更换 key 或请求范围绕过。等待真实成功或明确失败再报告。`;
       await turn(
         'child-work',
         `请${childAssignment}父 Agent 只负责委派、等待准确子任务的实际完成和汇总，不得代执行 git_worktree 调用，不要因仅受理就收尾。若子任务失败如实解释，不换角色、不重复创建子任务。`,
@@ -1350,13 +1378,35 @@ export async function runGitWorktreeLive(
         const created = requireOne(
           childTools.filter((row) => object(row.input).action === 'create'),
           'create',
-          createKey,
+          selectedCase === 'child-approval' ? undefined : createKey,
         );
         const removed = requireOne(
           childTools.filter((row) => object(row.input).action === 'remove'),
           'remove',
-          removeKey,
+          selectedCase === 'child-approval' ? undefined : removeKey,
         );
+        if (selectedCase === 'child-approval') {
+          const createDetails = object(object(created.result).details);
+          const removeDetails = object(object(removed.result).details);
+          for (const receipt of [createDetails, removeDetails])
+            check(
+              receipt.path === target &&
+                receipt.mutation === 'completed' &&
+                typeof receipt.operation_ref === 'string' &&
+                typeof receipt.key === 'string' &&
+                /^worktree-[a-f0-9]{64}$/.test(receipt.key),
+              'native-owned-operation-receipt',
+            );
+          check(
+            createDetails.key !== removeDetails.key &&
+              createDetails.operation_ref !== removeDetails.operation_ref,
+            'native-distinct-create-remove-receipts',
+          );
+          observedWorktreeKeys = {
+            create: String(createDetails.key),
+            remove: String(removeDetails.key),
+          };
+        }
         if (defaultCase) {
           const expectedTarget = resolveDefaultWorktreeTarget({
             defaultRoot: join(fixtureHome, '.kite-code', 'worktrees'),
@@ -1559,14 +1609,71 @@ export async function runGitWorktreeLive(
         'original-child-result-source-consumed-by-parent',
       );
     }
+    const ordinaryJobIds = new Set<string>();
+    if (selectedCase === 'child-approval') {
+      // The Service owns output collection even when no artifact was produced.
+      // Admit only the exact persisted action/collector pairs for original Jobs.
+      const rows = finalDirectory.executions;
+      const collectors = rows.filter(
+        ({ kind, definitionId }) => kind === 'job' && definitionId === 'builtin.files/collect',
+      );
+      const collectionIds = new Set<string>();
+      for (const collector of collectors) {
+        const id = object(collector.input).collectionId;
+        check(typeof id === 'string' && !collectionIds.has(id), 'one-owned-collection-per-input');
+        collectionIds.add(String(id));
+        const registered = rows.find(({ id }) => id === collector.parentExecutionId);
+        const record = await store.getExtensionRecord({
+          extensionId: 'builtin.files',
+          sessionId: collector.sessionId,
+          key: String(id),
+        });
+        const state = object(record?.value);
+        const source = object(state.source);
+        const producer = rows.find(({ id }) => id === source.producerExecutionId);
+        check(
+          record?.originStoreId === expectedStoreId &&
+            record.contentType === 'builtin.files.collection' &&
+            state.id === id &&
+            state.state === 'ready' &&
+            state.collectorExecutionId === collector.id &&
+            producer &&
+            isWorktreeShellJob(producer, rows) &&
+            producer.originStoreId === collector.originStoreId &&
+            producer.sessionId === collector.sessionId &&
+            source.storeId === expectedStoreId &&
+            source.sessionId === collector.sessionId &&
+            source.runOriginSeq === producer.rootWorkSeq &&
+            source.producerToolExecutionId === producer.parentExecutionId &&
+            state.startCommandId === collector.rootWorkCommandId &&
+            registered?.definitionId === 'builtin.files/collect-outputs' &&
+            registered.sessionId === collector.sessionId &&
+            registered.rootWorkCommandId === collector.rootWorkCommandId &&
+            registered.rootWorkSeq === collector.rootWorkSeq &&
+            object(registered.input).collectionId === id &&
+            [registered, collector].every(
+              (row) =>
+                row.status === 'succeeded' &&
+                object(row.decisionSource).kind === 'action_decision' &&
+                object(row.decisionSource).actionId === 'collect-outputs' &&
+                object(row.decisionSource).extensionId === 'builtin.files',
+            ) &&
+            !ordinaryJobIds.has(registered.id),
+          'collector-pair-belongs-to-verified-original-worktree-job',
+        );
+        ordinaryJobIds.add(registered!.id);
+        ordinaryJobIds.add(collector.id);
+      }
+    }
     check(
       finalDirectory.executions.every(
         (row) =>
           row.kind !== 'job' ||
           (row.definitionId === 'shell.command' && row.cancelWithParent) ||
-          (selectedCase !== 'primary' && row.definitionId.startsWith('agent/')),
+          (selectedCase !== 'primary' && row.definitionId.startsWith('agent/')) ||
+          ordinaryJobIds.has(row.id),
       ),
-      'existing-attached-shell-jobs-only',
+      'existing-attached-shell-jobs-and-verified-host-actions-only',
     );
     const delivered = finalDirectory.executions
       .filter((row) => row.definitionId === 'git.worktree')
@@ -1872,14 +1979,14 @@ export async function runGitWorktreeLive(
           (selectedCase === 'child-readonly' ||
             (phaseEvidence.some(
               (record) =>
-                record.key === `git-worktree/${createKey}` &&
+                record.key === `git-worktree/${observedWorktreeKeys?.create ?? createKey}` &&
                 record.steps.some((step) => step.phase === 'prepare_create') &&
                 record.steps.some((step) => step.phase === 'create'),
             ) &&
               (selectedCase === 'child-notification' ||
                 phaseEvidence.some(
                   (record) =>
-                    record.key === `git-worktree/${removeKey}` &&
+                    record.key === `git-worktree/${observedWorktreeKeys?.remove ?? removeKey}` &&
                     record.steps.some((step) => step.phase === 'prepare_remove') &&
                     record.steps.some((step) => step.phase === 'remove'),
                 ))));

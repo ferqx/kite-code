@@ -118,12 +118,16 @@ function ApprovalToastScope({
           },
         ],
       }}
-      onDismiss={(id) => {
-        if (!current.current.visible || id !== activeId || current.current.key !== activeKey)
-          return;
-        if (notice.phase === 'failed') dismissedFailures.add(prefix + activeKey);
-        setDismissed((previous) => new Set(previous).add(activeKey));
-      }}
+      onDismiss={
+        notice.phase === 'unknown' && !notice.commandId
+          ? undefined
+          : (id) => {
+              if (!current.current.visible || id !== activeId || current.current.key !== activeKey)
+                return;
+              if (notice.phase === 'failed') dismissedFailures.add(prefix + activeKey);
+              setDismissed((previous) => new Set(previous).add(activeKey));
+            }
+      }
     />
   );
 }

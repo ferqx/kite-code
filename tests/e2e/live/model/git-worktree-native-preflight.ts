@@ -136,14 +136,20 @@ export async function runGitWorktreeNativePreflight(options: GitWorktreeNativePr
     store = await openSqliteStore(profile);
     expectedStoreId = (await store.getMetadata()).storeId;
     report.originStoreId = expectedStoreId;
-    const command = "printf '%s\\n' 'kite-worktree-native-preflight'";
+    const protectedSentinel = join(profile.profilePath, 'worktree-owned-sentinel');
+    const sentinel = 'fixture-secret-marker';
+    writeFileSync(protectedSentinel, sentinel, { flag: 'wx', mode: 0o600 });
+    // Read a marker only if the OS permits it; the exact expected output rules
+    // out leaking it. cd verifies metadata access to the actual private stage.
+    const quoted = `'${protectedSentinel.replaceAll("'", "'\"'\"'")}'`;
+    const command = `(cd "$TMPDIR") || exit 42; if /bin/cat ${quoted} 2>/dev/null; then exit 41; fi; printf '%s\\n' 'kite-worktree-native-preflight'`;
     const model = createFixedModel([
       [
         {
           type: 'tool_call',
           id: 'native-preflight-call',
-          name: 'shell_execute',
-          arguments: JSON.stringify({ command, ...scope }),
+          name: 'exec_command',
+          arguments: JSON.stringify({ cmd: command, ...scope, yield_time_ms: 10000 }),
         },
         { type: 'finish', reason: 'tool_calls', usage: { inputTokens: 1, outputTokens: 1 } },
       ],
@@ -264,8 +270,8 @@ export async function runGitWorktreeNativePreflight(options: GitWorktreeNativePr
     assert.equal(dispatches.length, 1);
     assert.deepEqual(object(job.input).permissions, scope);
     const ref = object(object(tool.result).details).ref;
-    assert.equal(captured.references.length, 1);
-    assert.deepEqual(object(captured.references[0]!.value).ref, ref);
+    assert.equal(captured.references.length, 2);
+    for (const record of captured.references) assert.deepEqual(object(record.value).ref, ref);
     assert.equal(object(ref).executionId, job.id);
     assert.equal(object(ref).commandId, job.originCommandId);
     assert.equal(object(ref).originStoreId, expectedStoreId);
@@ -298,6 +304,8 @@ export async function runGitWorktreeNativePreflight(options: GitWorktreeNativePr
     assert.equal(ended.coalition.id, reference.coalitionId);
     assert.equal(details.groupStopped, true);
     assert.equal(details.processTreeStopped, true);
+    report.protectedFixtureSentinelUnreadable = true;
+    report.privateStageMetadataReadable = true;
     report.originalStopConfirmed = true;
     report.originalReference = ref;
     report.originalCommand = originalCommand;

@@ -8,6 +8,7 @@ import {
 import {
   assertAnswerRecords,
   type NativeAnswerRecord,
+  advanceAnswerRecord,
   validateAnswerRecord,
 } from '../electron/answer-journal';
 import { callerCanonical, validateCallerRecord } from '../electron/caller-journal';
@@ -169,10 +170,10 @@ export function memoryPrivateData(): PrivateData {
       answers.set(value.intent.request.commandId, structuredClone(value));
       return { created: true, value };
     },
-    finishAnswer(id, phase) {
+    finishAnswer(id, phase, verifiedRejection) {
       const old = answers.get(id);
       if (!old) throw Error('answer_intent_missing');
-      const value = validateAnswerRecord({ ...old, phase });
+      const value = advanceAnswerRecord(old, phase, verifiedRejection);
       answers.set(id, value);
       return structuredClone(value);
     },

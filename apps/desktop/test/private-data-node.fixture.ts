@@ -249,7 +249,14 @@ if (mode === 'denied') {
       answer.intent,
     );
     assert.equal(data.finishAnswer('answer-0', 'accepted').phase, 'accepted');
-    assert.equal(data.finishAnswer('answer-0', 'unknown').phase, 'unknown');
+    assert.equal(data.finishAnswer('answer-0', 'unknown').phase, 'accepted');
+    assert.equal(data.finishAnswer('answer-1', 'failed').phase, 'failed');
+    assert.equal(data.finishAnswer('answer-1', 'unknown').phase, 'unknown');
+    assert.equal(data.finishAnswer('answer-1', 'failed', true).verifiedRejection, true);
+    data.close();
+    data = await open();
+    assert.equal(data.finishAnswer('answer-1', 'unknown').phase, 'failed');
+    assert.equal(data.finishAnswer('answer-1', 'accepted').verifiedRejection, true);
     data.close();
     const privatePath = join(profile, 'desktop-private/data.sqlite');
     const legacy = new DatabaseSync(privatePath);

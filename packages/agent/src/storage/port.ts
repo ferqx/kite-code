@@ -780,6 +780,13 @@ export interface Store {
     run: RunRecord | null;
   }>;
   planExecution(input: PlanExecutionInput): Promise<ExecutionRecord>;
+  splitUndispatchedFileEditBatch(
+    input: OwnedWrite & {
+      executionId: string;
+      digest: string;
+      controlReads?: readonly PermissionControlRead[];
+    },
+  ): Promise<ExecutionRecord[]>;
   /** Original-owner observation only; detached Jobs do not hold Task settlement. */
   inspectChildSettlement(
     input: OwnedWrite & { executionId: string },
@@ -931,6 +938,13 @@ export interface Store {
     input: OwnedWrite & {
       targetExecutionId: string;
       decision: import('../extensions').PermissionDecision;
+    },
+  ): Promise<AutoAuthorizationEvidence | null>;
+  resolveShellAuthorization(
+    input: OwnedWrite & {
+      targetExecutionId: string;
+      decision: import('../extensions').PermissionDecision;
+      proof: Json;
     },
   ): Promise<AutoAuthorizationEvidence | null>;
   readExecutionEvidence(

@@ -258,3 +258,44 @@ test('macOS SOCKS-only settings fail the dispatched Tool before network activity
     await binding.dispose();
   }
 });
+
+test('a Service-owned Web binding cannot transport without the final authorization proof', async () => {
+  let admissions = 0;
+  const configuration = createWebFetchConfiguration({
+    network: {
+      policy: { mode: 'public' },
+      async admitHop() {
+        admissions++;
+        return { allowed: false, revision: 'test' };
+      },
+    },
+  });
+  const binding = configuration.bind();
+  try {
+    const execute = binding.extension.tools![0]!.execute;
+    const input = { url: 'https://fixture.test/page' };
+    const context = { signal: AbortSignal.timeout(1000) } as ToolContext;
+    expect(await execute(input, context)).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'web_grant_proof_missing' },
+    });
+    expect(
+      await execute(input, {
+        ...context,
+        dispatchAuthorization: {
+          revision: 'test',
+          acceptedGrant: {
+            contractId: 'builtin.web.exact-origin',
+            scope: { origin: 'https://another.test' },
+          },
+        },
+      }),
+    ).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'web_grant_scope_invalid' },
+    });
+    expect(admissions).toBe(0);
+  } finally {
+    await binding.dispose();
+  }
+});

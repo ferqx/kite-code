@@ -29,6 +29,12 @@ export class AuthorizationRefreshRequired extends AgentError {
   }
 }
 
+export class FileEditBatchRequiresIndependentReview extends AgentError {
+  constructor() {
+    super('file_edit_batch_requires_independent_policy_review');
+  }
+}
+
 export type AuthorizationChangeWait = (
   cursor: string,
   signal: AbortSignal,

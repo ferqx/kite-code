@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { canonicalJson } from '../../json';
+import { coveredFileEdit, fileEditBatchSeal } from '../file-edit-batch';
 import type { CancelCommandInput, CancelWorkInput } from '../port';
 import type { StoppedModelProof } from '../recovery-history';
 import { AgentError, type Json, USER_STOPPED_UNDISPATCHED_TOOL } from '../types';
@@ -141,6 +142,26 @@ export function recordStoppedTools(
   const stoppedContent = userStopCommand(db, batch.runId)
     ? USER_STOPPED_UNDISPATCHED_TOOL
     : '上一轮已停止，此工具未执行';
+  // Compute all companion receipts while the exact original group is still
+  // planned. A saved human denial belongs to the whole batch, not just its card.
+  const deniedCompanions = new Map<string, ReturnType<typeof coveredFileEdit>>();
+  if (recoveryCommandId === undefined) {
+    for (const leader of executions) {
+      if (leader.state !== 'planned' || !savedApprovalDenial(db, leader)) continue;
+      const seal = fileEditBatchSeal(JSON.parse(String(leader.decision_source_json)) as Json);
+      if (!seal || leader.id !== seal.leaderExecutionId) continue;
+      const group = db.fileEditBatchRows(leader, 'settlement')!;
+      const refusal = undispatchedToolSettlement(db, stoppedContent, leader);
+      for (const member of group.members)
+        deniedCompanions.set(
+          member.id,
+          coveredFileEdit(group.leader, member, group.model, {
+            status: refusal.outcome,
+            result: refusal,
+          }),
+        );
+    }
+  }
   const recoveredDenials: string[] = [];
   const source = canonicalJson({ kind: 'model_decision', modelExecutionId: batch.executionId });
   const { tools = [] } = JSON.parse(String(model.run_configuration)) as {
@@ -210,7 +231,7 @@ export function recordStoppedTools(
       if (tool.dispatched !== 0n || (tool.state !== 'planned' && !reconciled))
         throw new AgentError('recovery_tool_history_unverifiable');
     }
-    const result = undispatchedToolSettlement(db, stoppedContent, tool);
+    const result = deniedCompanions.get(id) ?? undispatchedToolSettlement(db, stoppedContent, tool);
     if (tool) {
       if (tool.state === 'cancelled' && result.outcome === 'failed') recoveredDenials.push(id);
       if (tool.state !== 'cancelled' || result.outcome === 'failed') {

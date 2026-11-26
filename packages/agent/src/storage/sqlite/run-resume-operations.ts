@@ -5,6 +5,7 @@ import {
   contextRefreshCancellation,
   isOrdinaryContextRefreshRequest,
 } from '../../model-request-identity';
+import { fileEditBatchSeal } from '../file-edit-batch';
 import type { Store } from '../port';
 import {
   AgentError,
@@ -233,6 +234,15 @@ function originalScope(
     }
     ++count;
     if (e.origin_store_id !== input.expectedStoreId) throw new AgentError('operation_unverifiable');
+    // The exact batch plan is live-only. Adopting even one sealed pending Tool
+    // would allow this response's missing peers to enter standalone admission.
+    if (
+      e.kind === 'tool' &&
+      e.state === 'planned' &&
+      fileEditBatchSeal(parse(e.decision_source_json))
+    )
+      throw new AgentError('run_resume_checkpoint_unavailable');
+
     if (
       e.state === 'outcome_unknown' ||
       (e.kind !== 'model' &&

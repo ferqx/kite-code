@@ -102,6 +102,7 @@ export interface Message {
       | 'approved'
       | 'rejected'
       | 'submitted'
+      | 'submission_unconfirmed'
       | 'unavailable'
       | 'cancelled';
     readonly source: 'auto' | 'user';
@@ -117,6 +118,8 @@ export interface Message {
   readonly questionState?: 'pending' | 'submitted';
   /** Host-verified Core freshness rejection before adapter dispatch; never inferred from text. */
   readonly decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
+  /** Store-confirmed non-execution as a companion of one rejected file edit batch. */
+  readonly fileEditBatchRejectedMember?: true;
   /** Host-verified successful builtin Files read with exists:false; no file content. */
   readonly fileMissing?: true;
   readonly ask?: {

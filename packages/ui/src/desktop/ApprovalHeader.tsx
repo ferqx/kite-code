@@ -49,6 +49,7 @@ export function ChildAgentIcon({
 }
 
 export function ApprovalHeader({
+  title = '需要批准',
   child,
   scopeLabel,
   index,
@@ -56,6 +57,7 @@ export function ApprovalHeader({
   onPrevious,
   onNext,
 }: {
+  title?: string;
   child?: { identity: string; name: string };
   scopeLabel?: string;
   index: number;
@@ -67,7 +69,7 @@ export function ApprovalHeader({
     <header className="approval-heading">
       <div className="approval-heading-label">
         <HugeiconsIcon icon={Shield01Icon} aria-hidden="true" />
-        <strong>需要批准</strong>
+        <strong>{title}</strong>
         {child && (
           <span className="approval-child" title={child.name}>
             <ChildAgentIcon identity={child.identity} />

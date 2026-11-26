@@ -3,6 +3,7 @@ import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type Json, type RecoveryReport } from '../types';
 import { recordStoppedTools } from './cancel-operations';
+import { uncertainFileEditBatches } from './file-edit-batch-recovery';
 import type { SqliteOperations } from './operations';
 import { partitionRecoveryHistory, validateStoppedModelProofs } from './recovery-history';
 import { withReconciledFrontier } from './session-reconciliation';
@@ -134,8 +135,11 @@ export function recoverSession(db: SqliteOperations, input: Input): RecoveryRepo
       snapshotCursor: '',
     };
     if (report.unknownExecutionIds.length > 4096) throw new AgentError('recovery_too_large');
+    const uncertainBatches = uncertainFileEditBatches(db, executions);
     for (const execution of executions) {
+      const batch = uncertainBatches.get(String(execution.id));
       const unstarted =
+        !batch &&
         execution.state === 'planned' &&
         execution.dispatched === 0n &&
         execution.origin_store_id === input.expectedStoreId;
@@ -151,6 +155,14 @@ export function recoverSession(db: SqliteOperations, input: Input): RecoveryRepo
         incomplete: execution.kind === 'model',
         recoveryCommandId: input.commandId,
         evidenceSource: 'local_process_recovery',
+        ...(batch
+          ? {
+              outcome: 'outcome_unknown',
+              content:
+                'The shared file edit outcome could not be confirmed. Do not repeat this edit.',
+              details: { kind: 'file_edit_batch@1', ...batch, code: 'recovery_outcome_unknown' },
+            }
+          : {}),
       };
       db.run(
         'UPDATE execution SET state=?,result_json=?,result_revision=result_revision+1 WHERE id=?',
@@ -159,13 +171,15 @@ export function recoverSession(db: SqliteOperations, input: Input): RecoveryRepo
         execution.id,
       );
       const history = histories.find((history) => history.executionId === execution.id);
-      if (history)
+      if (history || batch)
         db.appendMessage(
           String(execution.session_id),
           String(execution.run_id),
           {
-            content: canonicalJson(result),
-            toolCallId: history.callId,
+            content: batch
+              ? String((result as Record<string, Json>).content)
+              : canonicalJson(result),
+            toolCallId: history?.callId ?? String(execution.call_id),
             sourceIds: [String(execution.id)],
           },
           'tool',

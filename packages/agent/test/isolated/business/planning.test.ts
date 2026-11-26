@@ -388,6 +388,89 @@ test('model progress binds the actual current Run and rejects a supplied Run ins
   }
 });
 
+test('an inaccessible execution is the same non-mutating plan evidence failure as an absent execution', async () => {
+  const missingId = crypto.randomUUID();
+  let siblingId = '';
+  const f = await fixture({ requirePlan: false }, async (step, run) => {
+    if (step === 0) return call('fixture.effect');
+    if (step === 6) return call('fixture.launch');
+    if (step === 1) return [finish];
+    if (step === 2) return call('write_plan', modelPlan(null));
+    const plan = (await run.record('plan.current'))!.value as Record<string, Json>;
+    const planRef = await run.planRef(plan);
+    if (step === 3) return call('request_plan_review', { plan_ref: planRef });
+    if (step >= 4 && step <= 7) {
+      expect(await run.record('progress/p/1')).toBeNull();
+      const own =
+        step === 7
+          ? (await run.store.listExecutions('s')).find(
+              (item) => item.definitionId === 'fixture.job',
+            )!.id
+          : '';
+      return call('update_plan_progress', {
+        plan_ref: planRef,
+        progress_ref: null,
+        step_id: 'a',
+        status: 'completed',
+        execution_id: step === 4 ? siblingId : step === 5 ? missingId : own,
+        complete_plan: true,
+      });
+    }
+    return [finish];
+  });
+  try {
+    const sibling = { ...f.base, sessionId: 'sibling' };
+    await f.runtime.createSession({
+      ...sibling,
+      commandId: 'create-sibling',
+      workspaceId: 'w',
+      title: 'Independent operation',
+    });
+    await f.runtime.submitCommand({
+      ...sibling,
+      commandId: 'sibling-work',
+      request: { kind: 'run.start', content: 'Execute the independent fixture operation.' },
+    });
+    expect(await f.done('sibling-work')).toMatchObject({ status: 'completed' });
+    const original = (await f.store.listExecutions('sibling')).find(
+      (item) => item.definitionId === 'fixture.effect',
+    )!;
+    expect(original.status).toBe('succeeded');
+    siblingId = original.id;
+    await f.submit();
+    await f.answer({ kind: 'plan_review', decision: 'approve' });
+    expect(await f.done()).toMatchObject({ status: 'completed' });
+    const updates = (await f.store.listExecutions('s')).filter(
+      (item) => item.definitionId === 'planning.update',
+    );
+    expect(updates.map(({ status, result }) => [status, result]).slice(0, 2)).toEqual(
+      Array.from({ length: 2 }, () => [
+        'failed',
+        { outcome: 'failed', content: 'plan_execution_evidence_required' },
+      ]),
+    );
+    expect(updates).toHaveLength(3);
+    expect(updates[2]!.status).toBe('succeeded');
+    const executions = await f.store.listExecutions('s');
+    const job = executions.find((item) => item.definitionId === 'fixture.job')!;
+    const starter = executions.find((item) => item.definitionId === 'fixture.launch')!;
+    expect(job).toMatchObject({
+      status: 'succeeded',
+      runId: null,
+      parentExecutionId: starter.id,
+    });
+    expect(starter.runId).toBe(await f.runId());
+    expect((await f.record('progress/p/1'))!.value).toMatchObject({
+      steps: { a: { status: 'completed', receipt: { executionId: job.id } } },
+      completePlan: true,
+    });
+    expect(f.effects).toBe(1);
+    expect(f.jobStarts).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
 test('canonical progress keeps explicit Run validation and the user Action still requires its original Run field', async () => {
   const extension = createPlanningValidation().extension;
   const tool = extension.tools!.find((item) => item.id === 'planning.update')!;

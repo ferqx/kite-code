@@ -2111,41 +2111,158 @@ nativeTest(
   },
   15000,
 );
+const oneShotShellCommand = 'printf once >> effect';
+const workspaceOutsideScope = { filesystem: 'full_access', network: 'none' } as const;
+
+async function originalShellWork(f: Awaited<ReturnType<typeof fixture>>, commandId: string) {
+  const start = (await f.store.getCommand(commandId))!;
+  const runId = (start.receipt as { runId: string }).runId;
+  expect(runId).toBeTruthy();
+  const executions = await f.store.listExecutions('s');
+  const tool = executions.find(
+    (row) => row.runId === runId && row.definitionId === 'shell.execute',
+  );
+  expect(tool).toBeDefined();
+  const interactions = (await f.store.listInteractions(f.base)).interactions;
+  const jobs = executions.filter(
+    (row) => row.parentExecutionId === tool!.id && row.definitionId === 'shell.command',
+  );
+  return {
+    tool: tool!,
+    jobs,
+    cards: interactions.filter(
+      (row) => row.executionId === tool!.id || jobs.some((job) => job.id === row.executionId),
+    ),
+  };
+}
+
+async function originalShellSettlement(f: Awaited<ReturnType<typeof fixture>>, commandId: string) {
+  return until(async () => {
+    const booked = await f.store.getCommand(commandId);
+    if (!booked || booked.status === 'accepted') return;
+    expect(booked.status).toBe('applied');
+    const runId = (booked.receipt as { runId: string }).runId;
+    if (
+      !(await f.store.listExecutions('s')).some(
+        (row) => row.runId === runId && row.definitionId === 'shell.execute',
+      )
+    )
+      return;
+    const work = await originalShellWork(f, commandId);
+    // Fail immediately on the regression, instead of eventually timing out on a pending Job.
+    expect(work.cards.filter((row) => row.definitionId === 'shell.command')).toHaveLength(0);
+    const run = (await f.store.getView('s')).runs.find((row) => row.id === runId);
+    return run?.status === 'completed' ? work : undefined;
+  });
+}
+
+function expectParentShellDispatch(
+  work: Awaited<ReturnType<typeof originalShellWork>>,
+  scope: RequestedScope,
+) {
+  expect(work.tool.status).toBe('succeeded');
+  expect(work.jobs).toHaveLength(1);
+  expect(work.jobs[0]).toMatchObject({
+    kind: 'job',
+    definitionId: 'shell.command',
+    parentExecutionId: work.tool.id,
+    interactionBinding: null,
+    status: 'succeeded',
+    authorization: {
+      dispatched: true,
+      policy: {
+        evidenceId: expect.any(String),
+        reason: 'parent_review',
+        sourceExecutionId: work.tool.id,
+        requestedScope: scope,
+        effectiveScope: scope,
+      },
+    },
+    result: { details: { processTreeStopped: true } },
+  });
+  expect(work.jobs[0]?.authorization?.human).toBeUndefined();
+}
+
 nativeTest(
-  'Request Approval launch approval precedes a separate exact Shell Job approval and any process effect',
+  'Shell approval E2E: one exact once choice dispatches one Job; a new identical command still asks',
   async () => {
-    const f = await fixture({ mode: 'accept_edits', hostBoundary: true });
-    f.a.permissions({ filesystem: 'full_access', network: 'none' });
+    const f = await fixture({
+      persistentPermissions: true,
+      hostBoundary: true,
+      command: oneShotShellCommand,
+    });
+    f.a.permissions(workspaceOutsideScope);
+    const effect = join(f.workspace, 'effect');
     try {
       await f.submit();
-      const tool = await f.card('shell.execute');
-      expect(tool.request).toMatchObject({
-        policy: { effects: ['process', 'unknown', 'record_write'] },
+      const card = await f.card('shell.execute');
+      const held = await originalShellWork(f, 'work');
+      expect(held.tool).toMatchObject({
+        id: card.executionId,
+        status: 'planned',
+        input: { command: oneShotShellCommand, ...workspaceOutsideScope },
+        authorization: { dispatched: false },
       });
-      expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
-      expect(
-        (await f.store.listExecutions('s')).some((row) => row.definitionId === 'shell.command'),
-      ).toBe(false);
+      expect(held.cards.map((row) => row.id)).toEqual([card.id]);
+      expect(held.jobs).toHaveLength(0);
+      expect(existsSync(effect)).toBe(false);
+
       await f.approve('shell.execute', 'approve-tool');
-      const job = await f.card('shell.command');
-      expect(job.executionId).not.toBe(tool.executionId);
-      expect(job.request).toMatchObject({ policy: { effects: ['process', 'unknown'] } });
-      expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
-      expect((await f.store.getExecution(job.executionId))?.status).toBe('planned');
-      await f.approve('shell.command', 'approve-job');
-      await f.done();
-      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('once');
+      const accepted = await originalShellSettlement(f, 'work');
+      expectParentShellDispatch(accepted, workspaceOutsideScope);
+      expect(accepted.cards.map((row) => row.id)).toEqual([card.id]);
+      expect(accepted.cards[0]).toMatchObject({
+        state: 'answered',
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+        acceptedDecisionRevision: expect.any(String),
+      });
+      expect(accepted.tool.authorization?.human).toMatchObject({
+        interactionId: card.id,
+        accepted: true,
+        optionKind: 'once',
+      });
+      expect(readFileSync(effect, 'utf8')).toBe('once');
+
+      await f.submit('grant-once-repeat');
+      const again = await f.card('shell.execute');
+      expect(again.id).not.toBe(card.id);
+      expect(again.inputDigest).toBe(card.inputDigest);
+      const retry = await originalShellWork(f, 'grant-once-repeat');
+      expect(retry.tool.authorization?.dispatched).toBe(false);
+      expect(retry.jobs).toHaveLength(0);
+      expect(readFileSync(effect, 'utf8')).toBe('once');
+      await f.runtime.answerInteraction({
+        ...f.base,
+        presentationSessionId: 's',
+        commandId: 'deny-next-identical',
+        interactionId: again.id,
+        expectedRevision: again.revision,
+        answer: { kind: 'approval', decision: 'deny' },
+      });
+      const denied = await originalShellSettlement(f, 'grant-once-repeat');
+      expect(denied.cards.map((row) => row.id)).toEqual([again.id]);
+      expect(denied.tool).toMatchObject({
+        status: 'failed',
+        authorization: { dispatched: false, human: { decision: 'deny' } },
+        result: { details: { code: 'approval_denied' } },
+      });
+      expect(denied.jobs).toHaveLength(0);
+      expect(readFileSync(effect, 'utf8')).toBe('once');
     } finally {
       await f.close();
     }
   },
-  15000,
+  25000,
 );
 nativeTest(
-  'real Shell same_command accepts new executions and changed descriptions, keeps independent Tool/Job grants and clears once after a lost HTTP receipt',
+  'Shell approval E2E: one scoped choice covers its exact Job and is reused; changed Shell requests still ask',
   async () => {
-    const f = await fixture({ persistentPermissions: true, hostBoundary: true });
-    f.a.permissions({ filesystem: 'full_access', network: 'none' });
+    const f = await fixture({
+      persistentPermissions: true,
+      hostBoundary: true,
+      command: oneShotShellCommand,
+    });
+    f.a.permissions(workspaceOutsideScope);
     const serverProfile = {
       dataRoot: f.profile.dataRoot,
       name: f.profile.profile,
@@ -2211,28 +2328,28 @@ nativeTest(
       await f.submit('grant-first');
       const tool = await f.card('shell.execute');
       expect(tool.request).toMatchObject({ options: [{ kind: 'once' }, { kind: 'scope' }] });
+      const optionId = fixtureScopeOption(tool.request);
+      const beforeApproval = await originalShellWork(f, 'grant-first');
+      expect(beforeApproval.tool).toMatchObject({
+        status: 'planned',
+        authorization: { dispatched: false },
+      });
+      expect(beforeApproval.jobs).toHaveLength(0);
+      expect(existsSync(join(f.workspace, 'effect'))).toBe(false);
       await client.answerInteraction('s', tool.id, {
         expectedStoreId: f.base.expectedStoreId,
         commandId: 'grant-tool',
         expectedRevision: tool.revision,
-        answer: {
-          kind: 'approval',
-          decision: 'approve',
-          optionId: fixtureScopeOption(tool.request),
-        },
+        answer: { kind: 'approval', decision: 'approve', optionId },
       });
-      const job = await f.card('shell.command');
-      await client.answerInteraction('s', job.id, {
-        expectedStoreId: f.base.expectedStoreId,
-        commandId: 'grant-job',
-        expectedRevision: job.revision,
-        answer: {
-          kind: 'approval',
-          decision: 'approve',
-          optionId: fixtureScopeOption(job.request),
-        },
+      const accepted = await originalShellSettlement(f, 'grant-first');
+      expectParentShellDispatch(accepted, workspaceOutsideScope);
+      expect(accepted.cards.map((row) => row.id)).toEqual([tool.id]);
+      expect(accepted.cards[0]).toMatchObject({
+        state: 'answered',
+        answer: { kind: 'approval', decision: 'approve', optionId },
+        acceptedDecisionRevision: expect.any(String),
       });
-      expect((await f.done('grant-first')).status).toBe('applied');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('once');
       await until(async () => (f.runtime.getLifecycleState().busy ? undefined : true));
       const beforeRead = (await f.store.getMetadata()).lastChangeCursor;
@@ -2242,60 +2359,96 @@ nativeTest(
         limit: 1,
       });
       expect(first.items).toHaveLength(1);
-      expect(first.nextAfterSeq).not.toBeNull();
-      const second = await client.listPermissionGrants('s', {
-        storeId: f.base.expectedStoreId,
-        afterSeq: first.nextAfterSeq!,
-        upperSeq: first.upperSeq,
-        limit: 1,
+      expect(first.nextAfterSeq).toBeNull();
+      const grant = first.items[0]!.grant;
+      expect(grant).toMatchObject({
+        kind: 'tool',
+        interactionId: tool.id,
+        executionId: accepted.tool.id,
+        ruleId: 'builtin.shell.command',
+        contractId: 'builtin.shell.exact-command',
+        scope: { commandDigest: expect.stringMatching(/^[a-f0-9]{64}$/) },
       });
-      expect(second.nextAfterSeq).toBeNull();
-      const grants = [...first.items, ...second.items].map((row) => row.grant);
-      expect(grants.map((row) => row.kind).sort()).toEqual(['job', 'tool']);
-      expect(new Set(grants.map((row) => row.interactionId))).toEqual(new Set([tool.id, job.id]));
-      expect(
-        grants.every((row) =>
-          /^[a-f0-9]{64}$/.test((row.scope as { commandDigest: string }).commandDigest),
-        ),
-      ).toBe(true);
       expect((await f.store.getMetadata()).lastChangeCursor).toBe(beforeRead);
       expect(f.a.requests).toHaveLength(beforeProvider);
       f.a.description('Inspect workspace state again');
       await f.submit('grant-second');
-      expect((await f.done('grant-second')).status).toBe('applied');
-      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('onceonce');
-      const executions = await f.store.listExecutions('s');
-      expect(
-        executions
-          .filter((row) => row.definitionId === 'shell.execute')
-          .map((row) => (row.input as { description: string }).description),
-      ).toEqual(['Inspect initial workspace state', 'Inspect workspace state again']);
-      expect(
-        executions.filter(
-          (row) => row.definitionId === 'shell.command' && row.status === 'succeeded',
-        ),
-      ).toHaveLength(2);
-      expect(
-        (
-          await f.store.listInteractions({
-            expectedStoreId: f.base.expectedStoreId,
-            sessionId: 's',
-            state: 'pending',
-          })
-        ).interactions,
-      ).toHaveLength(0);
-      f.a.command('printf changed >> effect');
-      await f.submit('grant-changed');
-      const changed = await f.card('shell.execute');
-      expect(changed.id).not.toBe(tool.id);
-      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('onceonce');
-      await client.answerInteraction('s', changed.id, {
-        expectedStoreId: f.base.expectedStoreId,
-        commandId: 'deny-changed',
-        expectedRevision: changed.revision,
-        answer: { kind: 'approval', decision: 'deny' },
+      const repeated = await originalShellSettlement(f, 'grant-second');
+      expectParentShellDispatch(repeated, workspaceOutsideScope);
+      expect(repeated.cards).toHaveLength(0);
+      expect(repeated.tool.id).not.toBe(accepted.tool.id);
+      expect(repeated.tool.input).toMatchObject({
+        command: oneShotShellCommand,
+        description: 'Inspect workspace state again',
       });
-      await f.done('grant-changed');
+      const db = new Database(f.profile.databasePath, { readonly: true });
+      try {
+        const recorded = db
+          .query<{ dispatch_authorization_json: string }, [string]>(
+            'SELECT dispatch_authorization_json FROM execution WHERE id = ?',
+          )
+          .get(repeated.tool.id)!;
+        expect(JSON.parse(recorded.dispatch_authorization_json)).toMatchObject({
+          grant: { grantId: grant.interactionId, offer: { scopeDigest: grant.scopeDigest } },
+        });
+      } finally {
+        db.close();
+      }
+      expect(
+        (await client.listPermissionGrants('s', { storeId: f.base.expectedStoreId })).items.map(
+          (row) => row.grant.interactionId,
+        ),
+      ).toEqual([grant.interactionId]);
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('onceonce');
+
+      const denyChanged = async (
+        id: string,
+        input: { command: string; workdir?: string } & RequestedScope,
+      ) => {
+        await f.submit(id);
+        const changed = await f.card('shell.execute');
+        const pending = await originalShellWork(f, id);
+        expect(changed.id).not.toBe(tool.id);
+        expect(pending.tool).toMatchObject({
+          status: 'planned',
+          input,
+          authorization: { dispatched: false },
+        });
+        expect(pending.jobs).toHaveLength(0);
+        await client.answerInteraction('s', changed.id, {
+          expectedStoreId: f.base.expectedStoreId,
+          commandId: `deny-${id}`,
+          expectedRevision: changed.revision,
+          answer: { kind: 'approval', decision: 'deny' },
+        });
+        const denied = await originalShellSettlement(f, id);
+        expect(denied.cards.map((row) => row.id)).toEqual([changed.id]);
+        expect(denied.tool).toMatchObject({
+          status: 'failed',
+          authorization: { dispatched: false, human: { decision: 'deny' } },
+          result: { details: { code: 'approval_denied' } },
+        });
+        expect(denied.jobs).toHaveLength(0);
+        expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('onceonce');
+      };
+      const changedCommand = 'printf changed >> effect';
+      f.a.command(changedCommand);
+      await denyChanged('grant-changed', { command: changedCommand, ...workspaceOutsideScope });
+      f.a.command(oneShotShellCommand);
+      const changedScope = { filesystem: 'full_access', network: 'internet' } as const;
+      f.a.permissions(changedScope);
+      await denyChanged('grant-changed-scope', { command: oneShotShellCommand, ...changedScope });
+      f.a.permissions(workspaceOutsideScope);
+      const otherWorkdir = join(f.workspace, 'other-working-directory');
+      mkdirSync(otherWorkdir);
+      f.a.workdir(otherWorkdir);
+      await denyChanged('grant-changed-workdir', {
+        command: oneShotShellCommand,
+        workdir: otherWorkdir,
+        ...workspaceOutsideScope,
+      });
+      expect(existsSync(join(otherWorkdir, 'effect'))).toBe(false);
+      f.a.workdir();
       const original = {
         expectedStoreId: f.base.expectedStoreId,
         commandId: 'clear-original',
@@ -2332,27 +2485,16 @@ nativeTest(
         }),
       ).toEqual(receipt);
       expect(clearPosts).toBe(1);
-      f.a.command(
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: Actual POSIX environment expansion must remain literal.
-        'printf \'%s|%s|%s\' "$PWD" "$FIXED_VALUE" "${HOME-unset}"; printf once >> effect',
-      );
-      await f.submit('grant-after-clear');
-      const after = await f.card('shell.execute');
-      expect(after.id).not.toBe(tool.id);
-      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('onceonce');
-      await client.answerInteraction('s', after.id, {
-        expectedStoreId: original.expectedStoreId,
-        commandId: 'deny-after-clear',
-        expectedRevision: after.revision,
-        answer: { kind: 'approval', decision: 'deny' },
+      await denyChanged('grant-after-clear', {
+        command: oneShotShellCommand,
+        ...workspaceOutsideScope,
       });
-      await f.done('grant-after-clear');
-      const changedScope = await fetch(
+      const invalidSubject = await fetch(
         service.endpoint +
           `/v1/sessions/s/permission-grants?storeId=${original.expectedStoreId}&subjectId=other`,
         { headers: { authorization: `Bearer ${service.bootstrap.token}` } },
       );
-      expect(changedScope.status).toBe(400);
+      expect(invalidSubject.status).toBe(400);
       const directory = await fetch(
         `${service.endpoint}/v1/sessions/s/permission-grants?storeId=${original.expectedStoreId}`,
         { headers: { authorization: `Bearer ${service.bootstrap.token}` } },
@@ -2646,7 +2788,7 @@ nativeTest(
 nativeTest(
   'formal Request Approval runs opaque Workspace Shell once and independently approves outside writes and Internet',
   async () => {
-    const f = await fixture({ mode: 'accept_edits', hostBoundary: true });
+    const f = await fixture({ persistentPermissions: true, hostBoundary: true });
     let connections = 0;
     const server = createServer((_request, response) => {
       connections++;
@@ -2660,11 +2802,8 @@ nativeTest(
       (await f.store.listExecutions('s'))
         .filter((row) => row.definitionId === 'shell.command')
         .at(-1)!;
-    const approveBoth = async (prefix: string) => {
+    const approveOriginal = async (prefix: string) => {
       await f.approve('shell.execute', `${prefix}-tool`);
-      const card = await f.card('shell.command');
-      expect((await f.store.getExecution(card.executionId))?.status).toBe('planned');
-      await f.approve('shell.command', `${prefix}-job`);
     };
     try {
       f.a.command(
@@ -2694,8 +2833,10 @@ nativeTest(
         policy: { executionScope: { filesystem: 'full_access', network: 'none' } },
       });
       expect(existsSync(outside)).toBe(false);
-      await approveBoth('outside');
-      await f.done('grant-outside');
+      await approveOriginal('outside');
+      const outsideWork = await originalShellSettlement(f, 'grant-outside');
+      expectParentShellDispatch(outsideWork, workspaceOutsideScope);
+      expect(outsideWork.cards.map((row) => row.definitionId)).toEqual(['shell.execute']);
       expect(readFileSync(outside, 'utf8')).toBe('granted');
       expect(connections).toBe(0);
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('beginendoutside');
@@ -2718,8 +2859,13 @@ nativeTest(
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('beginendoutside');
 
       await f.submit('grant-network');
-      await approveBoth('network');
-      await f.done('grant-network');
+      await approveOriginal('network');
+      const networkWork = await originalShellSettlement(f, 'grant-network');
+      expectParentShellDispatch(networkWork, {
+        filesystem: 'workspace_write',
+        network: 'internet',
+      });
+      expect(networkWork.cards.map((row) => row.definitionId)).toEqual(['shell.execute']);
       expect(connections).toBe(1);
       expect(readFileSync(outside, 'utf8')).toBe('granted');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('beginendoutsidenetwork');

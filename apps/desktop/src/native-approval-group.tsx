@@ -33,6 +33,17 @@ export function nativeApprovalOwnerLabel(
     : '子 Agent';
 }
 
+/** The runtime writes this display hint outside the nested policy and input. */
+function approvalTitle(card: Interaction) {
+  const request = card.request;
+  return request &&
+    typeof request === 'object' &&
+    !Array.isArray(request) &&
+    request.approvalPresentation === 'reviewer_handoff'
+    ? '自动审核转人工'
+    : undefined;
+}
+
 /** One presentation surface; every item retains its original answer and attachment authority. */
 export function NativeApprovalGroup({
   interactions,
@@ -129,6 +140,7 @@ export function NativeApprovalGroup({
           }}
         >
           <ApprovalHeader
+            title={approvalTitle(current)}
             scopeLabel={priority?.earlier(current) ? '较早轮次' : undefined}
             child={
               current.originStoreId === storeId && current.sessionId === rootSessionId

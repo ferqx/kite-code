@@ -157,6 +157,20 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
       servers: [...selected].map(([id, server]) => ({ id, configDigest: server.configDigest })),
     };
     const dynamic = new Map<string, CapabilityDescription>();
+    // Display is bounded and sanitized before admission; raw identity remains the exact
+    // ToolDefinition and descriptor from the selected catalogue.
+    const displayName = (name: unknown): string | undefined => {
+      if (typeof name !== 'string') return undefined;
+      const clean = name
+        .replace(/[\p{Cc}\p{Cf}]/gu, ' ')
+        .replace(/\s+/gu, ' ')
+        .trim();
+      if (!clean) return undefined;
+      const points = Array.from(clean);
+      return points.length > 200 ? `${points.slice(0, 199).join('')}…` : clean;
+    };
+    const registeredNames = new Map<string, { serverName: string; toolName: string }>();
+    let registryOwner: { sessionId: string; runId: string } | undefined;
     const readStepCapabilities: StepCapabilitiesReader = async (input) => {
       const cached = lifecycle
         ? await lifecycle.readStepCapabilities({
@@ -164,19 +178,42 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
             selectedServerIds: [...selected.keys()],
           })
         : { extensions: [], toolIds: [], snapshot: { mcp: [] } };
-      const extensions = cached.extensions.filter(
-        (extension) =>
-          extension.id === 'builtin.mcp.discovery' ||
-          selected.has(extension.id.slice('builtin.mcp.remote.'.length)),
-      );
-      const toolMetadata = new Map(
-        extensions.flatMap((extension) =>
-          (extension.tools ?? []).flatMap((tool) => {
-            const metadata = lifecycle?.readToolReviewMetadata(tool);
-            return metadata ? [[key('tool', tool.id, tool.version), metadata] as const] : [];
-          }),
-        ),
-      );
+      const facts = cached.snapshot as { mcp: Json[] };
+      const toolMetadata = new Map<
+        string,
+        NonNullable<ReturnType<NonNullable<typeof lifecycle>['readToolReviewMetadata']>>
+      >();
+      registeredNames.clear();
+      registryOwner = { sessionId: input.session.id, runId: input.run.id };
+      const extensions = cached.extensions.flatMap((extension) => {
+        if (extension.id === 'builtin.mcp.discovery') return [extension];
+        const serverId = extension.id.slice('builtin.mcp.remote.'.length);
+        const selectedServer = selected.get(serverId);
+        if (!selectedServer) return [];
+        const servers = facts.mcp.filter((fact) => {
+          const info = object(fact);
+          return (
+            info.serverId === serverId &&
+            info.sessionId === input.session.id &&
+            info.originalStoreId === input.command.originStoreId &&
+            info.runId === input.run.id &&
+            info.configDigest === selectedServer.configDigest &&
+            String(info.generation) === extension.version
+          );
+        });
+        const serverName =
+          servers.length === 1 ? displayName(object(servers[0]!).serverName) : undefined;
+        const tools = (extension.tools ?? []).filter((tool) => {
+          const metadata = lifecycle?.readToolReviewMetadata(tool);
+          const toolName = displayName(metadata?.name);
+          if (!metadata || !serverName || !toolName) return false;
+          const exact = key('tool', tool.id, tool.version);
+          toolMetadata.set(exact, metadata);
+          registeredNames.set(exact, { serverName, toolName });
+          return true;
+        });
+        return [{ ...extension, tools }];
+      });
       dynamic.clear();
       for (const extension of extensions) {
         for (const [kind, definitions] of [
@@ -216,7 +253,6 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
               }),
             );
       }
-      const facts = cached.snapshot as { mcp: Json[] };
       return {
         extensions,
         toolIds: extensions.flatMap((extension) => (extension.tools ?? []).map((tool) => tool.id)),
@@ -237,6 +273,15 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
           ),
           ...dynamic.values(),
         ]);
+      },
+      approvalNames(request: AuthorizationRequest) {
+        return request.kind === 'tool' &&
+          request.sessionId === registryOwner?.sessionId &&
+          request.runId === registryOwner.runId
+          ? (registeredNames.get(
+              key(request.kind, request.definitionId, request.definitionVersion),
+            ) ?? null)
+          : null;
       },
       admissionError(request: AuthorizationRequest, resolvedInput: Json = request.input) {
         if (

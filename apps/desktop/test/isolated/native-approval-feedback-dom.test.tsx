@@ -303,6 +303,26 @@ test('active errors use the existing settings Toast host and hover/focus lifetim
   }
 });
 
+test('unrecorded approval recovery remains available until the original issue resolves', async () => {
+  jest.useFakeTimers();
+  const original = { ...notice(), phase: 'unknown' as const, commandId: undefined };
+  const f = await fixture([original]);
+  try {
+    await f.advance(10000);
+    expect(f.toast()!.textContent).toContain('未能确认审批答复结果');
+    await act(() => f.button('核对原答复').click());
+    expect(f.queries).toHaveLength(1);
+    expect(f.queries[0]!.notice.commandId).toBeUndefined();
+    await act(async () => f.queries[0]!.flight.resolve());
+    expect(f.button('核对原答复').disabled).toBe(false);
+    await f.render({ notices: [] });
+    expect(f.toast()).toBeNull();
+  } finally {
+    await f.close();
+    jest.useRealTimers();
+  }
+});
+
 test('an original lookup failure remains queued while another operation or settings temporarily owns the foreground', async () => {
   const f = await fixture([notice()]);
   try {

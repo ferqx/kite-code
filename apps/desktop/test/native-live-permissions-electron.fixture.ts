@@ -340,7 +340,8 @@ async function verifyQueueWindow() {
   await draft.fill('QUEUE JOURNEY');
   await submit();
   const group = page!.getByRole('region', { name: '需要人工审批', exact: true });
-  await group.getByRole('button', { name: '仅此次', exact: true }).waitFor();
+  const approve = group.getByRole('button', { name: '允许写入工作区外', exact: true });
+  await approve.waitFor();
   const command = group.locator('.approval-command');
   await until(
     async () => command.innerText(),
@@ -388,9 +389,30 @@ async function verifyQueueWindow() {
   assert.equal(await group.getByRole('button', { name: /详情/ }).count(), 0);
   assert.ok((await group.boundingBox())!.height <= 112);
   await draft.hover();
+  const exactGrant = Array.isArray(completeRequest.options)
+    ? completeRequest.options.find(
+        (option) =>
+          option &&
+          typeof option === 'object' &&
+          !Array.isArray(option) &&
+          option.kind === 'scope' &&
+          option.ruleId === 'builtin.shell.command' &&
+          option.contractId === 'builtin.shell.exact-command',
+      )
+    : undefined;
+  const more = group.getByRole('button', { name: '更多批准方式', exact: true });
+  assert.equal(await more.count(), exactGrant ? 1 : 0);
+  if (exactGrant) {
+    await more.click();
+    const scope = page!.getByRole('menuitem', { name: '允许后续运行此命令', exact: true });
+    await scope.waitFor();
+    assert.equal(await scope.locator('small').count(), 0);
+    await screenshot('09b-queue-shell-single-line-scope');
+    await page!.keyboard.press('Escape');
+  }
   await screenshot('09-queue-long-shell-approval');
   const toolApproval = await group.getByRole('article').getAttribute('aria-label');
-  await group.getByRole('button', { name: '仅此次', exact: true }).click();
+  await approve.click();
   await until(
     state,
     (value) =>
@@ -594,7 +616,7 @@ async function assertApprovalGroup(cards: Record<(typeof roles)[number], string>
   assert.equal(await group.getByRole('article').count(), 1);
   assert.equal(await group.getByText('主 Agent', { exact: true }).count(), 0);
   assert.equal(await group.getByRole('button', { name: /详情/ }).count(), 0);
-  assert.equal(await group.getByRole('button', { name: '仅此次', exact: true }).count(), 1);
+  await group.getByRole('button', { name: '允许编辑', exact: true }).waitFor();
   const box = await group.boundingBox();
   assert.ok(box && box.height <= 112, 'approval float fits default Composer height');
   const draft = page!.getByRole('textbox', { name: '当前会话私有草稿', exact: true });
@@ -1015,7 +1037,7 @@ try {
       assert.equal(card.answer, null);
       const approve = page
         .getByRole('article', { name: `approval ${id}`, exact: true })
-        .getByRole('button', { name: '仅此次', exact: true });
+        .getByRole('button', { name: '允许编辑', exact: true });
       await until(
         async () => ({
           visible: await approve.isVisible(),

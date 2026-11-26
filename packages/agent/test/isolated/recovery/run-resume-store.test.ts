@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { semanticDigest } from '../../../src/json';
+import { grantDigest } from '../../../src/permission-grants';
 import { selectProfile } from '../../../src/profile';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -555,6 +556,45 @@ for (const mode of ['tool', 'completion', 'length'] as const)
       await f.close();
     }
   });
+
+test('a partially persisted file edit batch cannot be adopted for explicit resume', async () => {
+  const f = await fixture('tool');
+  try {
+    const ordinary = await f.store.verifyRunResume(f.input);
+    expect(ordinary.checkpoint!.boundary).toBe('tool_calls');
+    // Simulate a crash after a sealed leader plan commits, before its peer.
+    const seal = {
+      kind: 'file_edit_batch@1',
+      modelExecutionId: 'model',
+      leaderExecutionId: 'tool',
+      digest: grantDigest('synthetic-batch'),
+      members: [
+        { callId: 'call', inputDigest: grantDigest({}) },
+        { callId: 'missing-peer', inputDigest: grantDigest({}) },
+      ],
+    };
+    f.db.run(
+      "UPDATE execution SET decision_source_json=json_set(decision_source_json,'$.fileEditBatch',json(?)) WHERE id='tool'",
+      [JSON.stringify(seal)],
+    );
+    const original = await f.store.getExecution('tool');
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    await denied(f.store.verifyRunResume(f.input), 'run_resume_checkpoint_unavailable');
+    await denied(
+      f.store.beginRunResume({
+        ...f.input,
+        checkpoint: ordinary.checkpoint!,
+        instanceId: 'new',
+      }),
+      'run_resume_checkpoint_unavailable',
+    );
+    expect(await f.store.getExecution('tool')).toEqual(original);
+    expect(await f.store.getCommand('resume')).toBeNull();
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+  } finally {
+    await f.close();
+  }
+});
 
 test('a length result with tool calls cannot qualify a resume checkpoint', async () => {
   const f = await fixture('tool');

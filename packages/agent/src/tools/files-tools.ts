@@ -1,4 +1,12 @@
-import type { ArtifactRef, ToolContext, ToolDefinition, ToolResult } from '../extensions';
+import type {
+  ActionContext,
+  ArtifactRef,
+  ToolContext,
+  ToolDefinition,
+  ToolResult,
+} from '../extensions';
+import type { FileEditBatchInput } from '../file-edit-batch-plan';
+import { semanticDigest } from '../json';
 import { modelReference, readModelReference } from '../model-reference';
 import type { Json } from '../storage/types';
 import { AgentError } from '../storage/types';
@@ -54,6 +62,72 @@ export async function fileBaselineReference(
   return original.baseline!;
 }
 
+export async function fileEditBatchTarget(
+  input: Json,
+  context: ActionContext,
+  files: WorkspaceFiles,
+  root: string,
+  batch?: readonly FileEditBatchInput[],
+) {
+  const value = object(input);
+  const path = files.relativePath(string(value.path));
+  const base = await implicitFileBaseline(path, context, files);
+  if (!base) return null;
+  const [rootIdentity, current] = await Promise.all([
+    files.inspectRootIdentity?.(),
+    files.inspectIdentity(path),
+  ]);
+  context.signal.throwIfAborted();
+  if (!rootIdentity || current.file?.device !== base.device || current.file?.inode !== base.inode)
+    return null;
+  let counts: Awaited<ReturnType<NonNullable<WorkspaceFiles['countEditBatch']>>>;
+  if (batch && batch.every((edit) => files.relativePath(edit.path) === path)) {
+    try {
+      counts = await files.countEditBatch?.({
+        path,
+        base,
+        replacements: batch.map((edit) => ({ ...edit, occurrences: 1 })),
+      });
+    } catch {
+      // A stale or conflicting edit is still handled by the original approval/CAS path.
+      context.signal.throwIfAborted();
+    }
+  }
+  return {
+    ...(counts ? { counts } : {}),
+    slot: await semanticDigest({
+      root,
+      rootIdentity: { ...rootIdentity },
+      parent: { ...current.parent },
+      path,
+    }),
+    baseline: await semanticDigest({ ...base }),
+  };
+}
+
+async function implicitFileBaseline(path: string, context: ActionContext, files: WorkspaceFiles) {
+  for (const { execution } of (await context.readDecisionToolResults?.()) ?? []) {
+    if (
+      execution.status !== 'succeeded' ||
+      !fileDefinitions[execution.definitionId as keyof typeof fileDefinitions]?.includes(
+        execution.definitionVersion ?? '',
+      )
+    )
+      continue;
+    const result = execution.result as { content?: string } | null;
+    let candidate: Record<string, Json>;
+    try {
+      candidate = object(JSON.parse(result?.content ?? 'null'));
+      if (typeof candidate.path !== 'string' || files.relativePath(candidate.path) !== path)
+        continue;
+    } catch {
+      continue;
+    }
+    return candidate.baseline === undefined ? null : baseline(candidate.baseline);
+  }
+  return null;
+}
+
 async function fileParameters(
   input: Record<string, Json>,
   context: ToolContext,
@@ -69,27 +143,8 @@ async function fileParameters(
     delete value.baseRef;
   } else if (mutation && context.readDecisionToolResults) {
     const selected = files.relativePath(string(value.path));
-    for (const { execution } of await context.readDecisionToolResults()) {
-      if (
-        execution.status !== 'succeeded' ||
-        !fileDefinitions[execution.definitionId as keyof typeof fileDefinitions]?.includes(
-          execution.definitionVersion ?? '',
-        )
-      )
-        continue;
-      const result = execution.result as { content?: string } | null;
-      let candidate: Record<string, Json>;
-      try {
-        candidate = object(JSON.parse(result?.content ?? 'null'));
-        if (typeof candidate.path !== 'string' || files.relativePath(candidate.path) !== selected)
-          continue;
-      } catch {
-        continue;
-      }
-      if (candidate.baseline !== undefined)
-        value.base = baseline(candidate.baseline) as unknown as Json;
-      break;
-    }
+    const base = await implicitFileBaseline(selected, context, files);
+    if (base) value.base = { ...base };
   }
   for (const field of ['content', 'find', 'replace']) {
     const reference = value[`${field}Ref`];
@@ -340,6 +395,36 @@ export function createFileTools(
         context.signal.throwIfAborted();
         const path = string(i.path),
           occurrences = i.occurrences === undefined ? 1 : (i.occurrences as number);
+        const batch = context.fileEditBatch;
+        if (batch) {
+          const editBatch = files.editBatch;
+          const leader = batch.members[0]?.input;
+          if (
+            !editBatch ||
+            !context.dispatchAuthorization ||
+            !leader ||
+            leader.find !== find ||
+            leader.replace !== replace ||
+            (leader.replaceAll === true) !== (i.replaceAll === true) ||
+            occurrences !== 1 ||
+            (await semanticDigest({ ...b })) !== batch.baseline ||
+            batch.members.some(({ input }) => files.relativePath(input.path) !== path)
+          )
+            throw new AgentError('file_edit_batch_binding_changed');
+          context.signal.throwIfAborted();
+          return mutation({ operation: 'edit', path, base: b }, context, () =>
+            editBatch.call(files, {
+              path,
+              base: b,
+              replacements: batch.members.map(({ input }) => ({
+                find: input.find,
+                replace: input.replace,
+                occurrences: 1,
+                replaceAll: input.replaceAll === true,
+              })),
+            }),
+          );
+        }
         return mutation({ operation: 'edit', path, base: b }, context, () =>
           files.edit({
             path,
@@ -540,9 +625,12 @@ export function createFileTools(
           outcome: 'succeeded',
           content,
           ...(delivery ? { artifactRefs: [delivery] } : {}),
-          ...(change || delivery
+          ...(change || delivery || (d.name === 'edit' && context.fileEditBatch)
             ? {
                 details: {
+                  ...(d.name === 'edit' && context.fileEditBatch
+                    ? { fileEditBatchDigest: context.fileEditBatch.digest }
+                    : {}),
                   ...(change ? { fileChange: change } : {}),
                   ...(delivery
                     ? { fileOutput: { path: mutationResult!.path, snapshot: delivery } }

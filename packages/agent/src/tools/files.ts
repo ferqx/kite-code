@@ -5,7 +5,7 @@ import { setImmediate } from 'node:timers/promises';
 import ignore, { type Ignore } from 'ignore';
 import { AgentError, type SessionExecutionRoot } from '../storage/types';
 import { hasPdfHeader, unsupportedFileRead } from './files/read-scope';
-import { fileChangePreview } from './files-diff';
+import { exactFileLineCounts, fileChangePreview } from './files-diff';
 import { createWorkspaceFileIo } from './files-io';
 
 export interface FileBaseline {
@@ -105,6 +105,32 @@ export interface FileSearchResult {
     filters: { glob: string | null; respectIgnore: boolean };
   };
 }
+interface FileEditReplacement {
+  find: string;
+  replace: string;
+  occurrences: number;
+  replaceAll?: boolean;
+}
+interface FileEditBatchInput {
+  path: string;
+  base: FileBaseline;
+  replacements: readonly FileEditReplacement[];
+}
+interface NativeFileEditBatch {
+  /** Trusted host primitive; callers must enforce authorization before invoking it. */
+  editBatch(input: FileEditBatchInput): Promise<FileSnapshot>;
+  /** Read-only metadata; the input must still match the previously admitted baseline. */
+  countEditBatch(input: FileEditBatchInput): Promise<
+    | {
+        added: number;
+        removed: number;
+        members?: readonly ({ added: number; removed: number } | null)[];
+      }
+    | undefined
+  >;
+}
+const MAX_FILE_EDIT_REPLACEMENTS = 32;
+
 export interface WorkspaceFiles {
   /** Model Tool boundary: resolve against the fixed Workspace, never process cwd. */
   relativePath(path: string): string;
@@ -139,14 +165,9 @@ export interface WorkspaceFiles {
     options?: { signal?: AbortSignal },
   ): Promise<{ paths: string[]; next: string | null }>;
   write(input: { path: string; content: string; base: FileBaseline | null }): Promise<FileSnapshot>;
-  edit(input: {
-    path: string;
-    base: FileBaseline;
-    find: string;
-    replace: string;
-    occurrences: number;
-    replaceAll?: boolean;
-  }): Promise<FileSnapshot>;
+  edit(input: { path: string; base: FileBaseline } & FileEditReplacement): Promise<FileSnapshot>;
+  editBatch?: NativeFileEditBatch['editBatch'];
+  countEditBatch?: NativeFileEditBatch['countEditBatch'];
   list(input?: {
     path?: string;
     afterName?: string;
@@ -230,7 +251,7 @@ export function createWorkspaceFiles(options: {
   protectedPaths?: readonly string[];
   /** Trusted host may apply the same deny scope to ordinary Tools as well as byte recovery. */
   protectReads?: boolean;
-}): WorkspaceFiles {
+}): WorkspaceFiles & NativeFileEditBatch {
   const max = options.maxFileBytes;
   if (max !== undefined && (!Number.isSafeInteger(max) || max < 1)) fail('file_limit_invalid');
   if (options.protectedPaths !== undefined && !Array.isArray(options.protectedPaths))
@@ -943,6 +964,68 @@ export function createWorkspaceFiles(options: {
     }
     return excluded;
   }
+  function composeEditBatch(input: FileEditBatchInput, budget = max, snapshot?: FileSnapshot) {
+    const { replacements } = input;
+    if (
+      !input.base ||
+      replacements.length === 0 ||
+      replacements.length > MAX_FILE_EDIT_REPLACEMENTS ||
+      replacements.some(
+        (edit) =>
+          !edit ||
+          typeof edit.find !== 'string' ||
+          !edit.find ||
+          typeof edit.replace !== 'string' ||
+          !Number.isSafeInteger(edit.occurrences) ||
+          edit.occurrences < 1,
+      )
+    )
+      fail('file_edit_invalid');
+    const original =
+      snapshot ?? withParent(input.path, (parent, name) => readAt(parent, name, input.path));
+    if (!baselineEqual(original.baseline, input.base)) fail('file_baseline_conflict');
+    // Keep only the next match per replacement. No edit ever sees another edit's output.
+    const matches = replacements.map((edit) => {
+      const bytes = Buffer.byteLength(edit.replace);
+      if (budget !== undefined && (Buffer.byteLength(edit.find) > budget || bytes > budget))
+        fail('file_too_large');
+      return { edit, bytes, start: original.content.indexOf(edit.find), count: 0 };
+    });
+    const pieces: string[] = [];
+    let cursor = 0;
+    let bytes = 0;
+    while (true) {
+      let match: (typeof matches)[number] | undefined;
+      for (const next of matches) {
+        if (next.start !== -1 && (!match || next.start < match.start)) match = next;
+      }
+      if (!match) break;
+      if (
+        match.start < cursor ||
+        (++match.count > match.edit.occurrences && !match.edit.replaceAll)
+      )
+        fail('file_edit_match_conflict');
+      const part = original.content.slice(cursor, match.start);
+      bytes += Buffer.byteLength(part) + match.bytes;
+      if (budget !== undefined && bytes > budget) fail('file_too_large');
+      pieces.push(part, match.edit.replace);
+      cursor = match.start + match.edit.find.length;
+      match.start = original.content.indexOf(match.edit.find, cursor);
+    }
+    if (
+      matches.some(({ edit, count }) =>
+        edit.replaceAll ? count === 0 : count !== edit.occurrences,
+      )
+    )
+      fail('file_edit_match_conflict');
+    const tail = original.content.slice(cursor);
+    if (budget !== undefined && bytes + Buffer.byteLength(tail) > budget) fail('file_too_large');
+    pieces.push(tail);
+    return { before: original.content, after: pieces.join('') };
+  }
+  async function editBatch(input: FileEditBatchInput) {
+    return write({ path: input.path, base: input.base, content: composeEditBatch(input).after });
+  }
   return {
     relativePath(path) {
       if (
@@ -1143,45 +1226,37 @@ export function createWorkspaceFiles(options: {
     async write(input) {
       return write(input);
     },
-    async edit(input) {
-      if (
-        !input.base ||
-        typeof input.find !== 'string' ||
-        !input.find ||
-        typeof input.replace !== 'string' ||
-        !Number.isSafeInteger(input.occurrences) ||
-        input.occurrences < 1
-      )
-        fail('file_edit_invalid');
+    async edit({ path, base, ...replacement }) {
+      return editBatch({ path, base, replacements: [replacement] });
+    },
+    editBatch,
+    async countEditBatch(input) {
+      const budget = Math.min(max ?? Infinity, 2 * 1024 * 1024);
+      if (input.base.size > budget) return;
       const original = withParent(input.path, (parent, name) => readAt(parent, name, input.path));
-      if (!baselineEqual(original.baseline, input.base)) fail('file_baseline_conflict');
+      const edit = composeEditBatch(input, budget, original);
+      const total = exactFileLineCounts(edit.before, edit.after);
+      if (!total) return undefined;
+      // Bound total work for individual rows, reuse the exact same verified snapshot.
       if (
-        max !== undefined &&
-        (Buffer.byteLength(input.find) > max || Buffer.byteLength(input.replace) > max)
+        Math.max(original.baseline.size, Buffer.byteLength(edit.after)) *
+          input.replacements.length >
+        budget
       )
-        fail('file_too_large');
-      const pieces: string[] = [];
-      let cursor = 0;
-      let count = 0;
-      let bytes = 0;
-      for (
-        let at = original.content.indexOf(input.find, cursor);
-        at !== -1;
-        at = original.content.indexOf(input.find, cursor)
-      ) {
-        if (++count > input.occurrences && !input.replaceAll) fail('file_edit_match_conflict');
-        const part = original.content.slice(cursor, at);
-        bytes += Buffer.byteLength(part) + Buffer.byteLength(input.replace);
-        if (max !== undefined && bytes > max) fail('file_too_large');
-        pieces.push(part, input.replace);
-        cursor = at + input.find.length;
-      }
-      if (input.replaceAll ? count === 0 : count !== input.occurrences)
-        fail('file_edit_match_conflict');
-      const tail = original.content.slice(cursor);
-      if (max !== undefined && bytes + Buffer.byteLength(tail) > max) fail('file_too_large');
-      pieces.push(tail);
-      return write({ path: input.path, base: input.base, content: pieces.join('') });
+        return total;
+      const members = input.replacements.map((replacement) => {
+        try {
+          const single = composeEditBatch(
+            { ...input, replacements: [replacement] },
+            budget,
+            original,
+          );
+          return exactFileLineCounts(single.before, single.after) ?? null;
+        } catch {
+          return null;
+        }
+      });
+      return { ...total, members };
     },
     async list(input = {}) {
       if (

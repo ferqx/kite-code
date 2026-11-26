@@ -192,11 +192,12 @@ export function worktreeLiveShellReferenceEvidence(
   records: readonly ExtensionRecord[],
   command: CommandRecord | null,
 ) {
+  const receipt = object(object(parent?.result).details);
   const expected = {
     commandId: job.originCommandId,
     executionId: job.id,
     extensionId: 'builtin.shell',
-    key: object(object(parent?.result).details).shell_id,
+    key: receipt.shell_id ?? object(receipt.ref).key,
     originStoreId: job.originStoreId,
     sessionId: job.sessionId,
   };
@@ -210,7 +211,22 @@ export function worktreeLiveShellReferenceEvidence(
   const matching = records.filter(
     (record) => object(object(record.value).ref).executionId === job.id,
   );
-  const record = matching[0];
+  const canonical = matching.filter(({ key }) => key === `shell/${expected.key}`);
+  const record = canonical[0];
+  const numeric = matching.filter(({ key }) => key === `shell-session/${receipt.session_id}`);
+  const exactReferences =
+    receipt.session_id === undefined
+      ? matching.length === 1
+      : Number.isSafeInteger(receipt.session_id) &&
+        Number(receipt.session_id) > 0 &&
+        matching.length === 2 &&
+        numeric.length === 1 &&
+        numeric[0]!.extensionId === 'builtin.shell' &&
+        numeric[0]!.sessionId === job.sessionId &&
+        numeric[0]!.contentType === 'application/vnd.kite.shell-reference+json' &&
+        numeric[0]!.contentVersion === 1 &&
+        Object.keys(object(numeric[0]!.value)).join() === 'ref' &&
+        equalRef(object(numeric[0]!.value).ref);
   const request = object(command?.request);
   return {
     expected,
@@ -234,7 +250,8 @@ export function worktreeLiveShellReferenceEvidence(
       object(command.receipt).commandId === command.id &&
       object(command.receipt).executionId === job.id,
     uniqueOriginalRecordAndReceipt:
-      matching.length === 1 &&
+      exactReferences &&
+      canonical.length === 1 &&
       typeof expected.key === 'string' &&
       record?.extensionId === 'builtin.shell' &&
       record.sessionId === job.sessionId &&

@@ -2675,15 +2675,17 @@ function NativeDesktopContent({
     includeRead: true,
     historyPending: historyState.phase !== 'complete' || !!selection?.viewLoading,
   });
-  const submittedInteractionIds = JSON.stringify(
-    (state?.selection?.interactions ?? [])
-      .filter(
-        (card) =>
-          card.state === 'pending' &&
-          (approvalPresentation.hidden(card) || nativeApprovalSubmission(card, state)),
-      )
-      .map((card) => card.id),
-  );
+  const submittedInteractionIds: string[] = [];
+  const unconfirmedApprovalIds: string[] = [];
+  for (const card of state?.selection?.interactions ?? []) {
+    if (card.state !== 'pending') continue;
+    if (isOrdinaryNativeApproval(card)) {
+      if (approvalPresentation.received(card)) submittedInteractionIds.push(card.id);
+      else if (approvalPresentation.hidden(card)) unconfirmedApprovalIds.push(card.id);
+    } else if (nativeApprovalSubmission(card, state)) submittedInteractionIds.push(card.id);
+  }
+  const submittedInteractionKey = JSON.stringify(submittedInteractionIds);
+  const unconfirmedApprovalKey = JSON.stringify(unconfirmedApprovalIds);
   const liveTools = useMemo(
     () =>
       liveToolMessages(
@@ -2691,7 +2693,8 @@ function NativeDesktopContent({
         displayMessages,
         executionUnconfirmed,
         toolMessages.entries,
-        new Set<string>(JSON.parse(submittedInteractionIds)),
+        new Set<string>(JSON.parse(submittedInteractionKey)),
+        new Set<string>(JSON.parse(unconfirmedApprovalKey)),
       ),
     [
       readingParent,
@@ -2699,7 +2702,8 @@ function NativeDesktopContent({
       displayMessages,
       executionUnconfirmed,
       toolMessages.entries,
-      submittedInteractionIds,
+      submittedInteractionKey,
+      unconfirmedApprovalKey,
     ],
   );
   const runMessages = useNativeRuns({

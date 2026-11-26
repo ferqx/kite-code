@@ -203,7 +203,7 @@ try {
   assert.ok(a && b && a.id !== b.id);
   stage = 'approve_A';
   await (await showApproval(page, a.id))
-    .getByRole('button', { name: '仅此次', exact: true })
+    .getByRole('button', { name: '允许编辑', exact: true })
     .click();
   await until(
     read,
@@ -305,7 +305,7 @@ try {
   checks.oldApprovalControlsDetached = true;
   checks.sameChildTwoAccurateRounds = true;
   stage = 'followup_approve';
-  await nextCard.getByRole('button', { name: '仅此次', exact: true }).click();
+  await nextCard.getByRole('button', { name: '允许编辑', exact: true }).click();
   const final = await until(
     read,
     (value) =>

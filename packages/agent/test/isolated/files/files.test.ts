@@ -14,7 +14,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ToolContext } from '../../../src/extensions';
+import { fileEditBatchPlans } from '../../../src/file-edit-batch-plan';
 import { createFileTools, createWorkspaceFiles, type WorkspaceFiles } from '../../../src/files';
+import { semanticDigest } from '../../../src/json';
 
 const roots: string[] = [];
 const handles: WorkspaceFiles[] = [];
@@ -77,6 +79,125 @@ test('complete UTF-8 baseline CAS, exact edits, create-only and atomic replace',
     'file_baseline_conflict',
   );
   expect(readdirSync(root)).toEqual(['text']);
+});
+test('trusted same-file batch edits match the original bytes and publish together', async () => {
+  const { root, files } = fixture(128);
+  const original = '你好 first\r\nsecond second\r\n';
+  const { baseline } = await files.write({ path: 'text', content: original, base: null });
+  const edit = (find: string, replace: string, replaceAll = false) => ({
+    find,
+    replace,
+    occurrences: 1,
+    replaceAll,
+  });
+  const batch = (replacements: ReturnType<typeof edit>[]) =>
+    files.editBatch({ path: 'text', base: baseline, replacements });
+  const unchanged = async () => {
+    expect((await files.read('text')).baseline).toEqual(baseline);
+    expect(readFileSync(join(root, 'text'), 'utf8')).toBe(original);
+  };
+  for (const invalid of [
+    [edit('first', 'ok'), edit('missing', 'no')],
+    [edit('first', 'ok'), edit('first\r\nsecond', 'overlap')],
+    [edit('first', 'new text'), edit('new text', 'old-snapshot-only')],
+    [edit('second', 'once'), edit('first', 'ok')],
+  ]) {
+    await code(batch(invalid), 'file_edit_match_conflict');
+    await unchanged();
+  }
+  await code(batch([]), 'file_edit_invalid');
+  await code(batch([edit('first', 'ok'), edit('second', 'x'.repeat(65), true)]), 'file_too_large');
+  await unchanged();
+  const result = await batch([edit('second', 'third', true), edit('first', 'second')]);
+  expect(result.content).toBe('你好 second\r\nthird third\r\n');
+  expect(result.change?.before).toEqual(baseline);
+  expect(result.change?.after).toEqual(result.baseline);
+  await code(batch([edit('first', 'stale'), edit('second', 'stale')]), 'file_baseline_conflict');
+  expect(readFileSync(join(root, 'text'), 'utf8')).toBe(result.content);
+  expect(readdirSync(root)).toEqual(['text']);
+});
+test('the exact Files adapter binds the sealed batch to its owned baseline and one capture', async () => {
+  const { root, files } = fixture();
+  const original = 'one\r\ntwo\r\n';
+  const { baseline } = await files.write({ path: 'code.ts', content: original, base: null });
+  const one = { path: 'code.ts', find: 'one', replace: 'first' };
+  const two = { path: 'code.ts', find: 'two', replace: 'second' };
+  const calls = [one, two].map((input, index) => ({
+    name: 'files.edit',
+    id: String(index),
+    arguments: JSON.stringify(input),
+  }));
+  const target = {
+    slot: 'verified-native-test-slot',
+    baseline: await semanticDigest({ ...baseline }),
+  };
+  const [batch] = await fileEditBatchPlans('original-model', calls, async () => target);
+  const writes: string[] = [];
+  const tool = createFileTools(files, {
+    capture: {
+      async before() {
+        writes.push('before');
+        return 'token';
+      },
+      async after(token, result) {
+        expect(token).toBe('token');
+        writes.push(result.content);
+      },
+      async failed() {
+        writes.push('failed');
+      },
+    },
+  }).find(({ id }) => id === 'files.edit')!;
+  const context = {
+    signal: new AbortController().signal,
+    executionId: 'original-edit',
+    fileEditBatch: batch,
+    dispatchAuthorization: { allowed: true, revision: 'trusted-test' },
+    readDecisionToolResults: async () => [
+      {
+        execution: {
+          status: 'succeeded',
+          definitionId: 'files.read',
+          definitionVersion: '4',
+          result: { content: JSON.stringify({ path: 'code.ts', baseline }) },
+        },
+      },
+    ],
+  } as unknown as ToolContext;
+  expect((await tool.execute({ ...one, replace: 'different' }, context)).details).toEqual({
+    code: 'file_edit_batch_binding_changed',
+    path: 'code.ts',
+  });
+  expect(writes).toEqual([]);
+  expect(readFileSync(join(root, 'code.ts'), 'utf8')).toBe(original);
+  expect((await tool.execute(one, context)).outcome).toBe('succeeded');
+  expect(writes).toEqual(['before', 'first\r\nsecond\r\n']);
+  expect(readFileSync(join(root, 'code.ts'), 'utf8')).toBe('first\r\nsecond\r\n');
+});
+test('same-line batch edits have individual counts but the file total only counts that line once', async () => {
+  const { files } = fixture();
+  const { baseline } = await files.write({
+    path: 'code.ts',
+    content: 'a = 1; b = 2;\n',
+    base: null,
+  });
+  expect(
+    await files.countEditBatch({
+      path: 'code.ts',
+      base: baseline,
+      replacements: [
+        { find: 'a = 1', replace: 'a = 3', occurrences: 1 },
+        { find: 'b = 2', replace: 'b = 4', occurrences: 1 },
+      ],
+    }),
+  ).toEqual({
+    added: 1,
+    removed: 1,
+    members: [
+      { added: 1, removed: 1 },
+      { added: 1, removed: 1 },
+    ],
+  });
 });
 test('no-follow path chain, non-regular/encoding/size and traversal reject without writes', async () => {
   const { root, files } = fixture(32);

@@ -29,13 +29,16 @@ import type {
   ToolResult,
 } from '../extensions';
 import { JobStartError } from '../extensions';
+import { type FileEditBatchPlan, fileEditBatchPlans } from '../file-edit-batch-plan';
 import { canonicalJson, semanticDigest } from '../json';
 import { bodyReference } from '../model-body';
 import { type ModelOutputReference, ModelOutputWriter } from '../model-output';
 import { captureModelRequestMetadata, modelMetadataJson } from '../model-snapshot';
 import { createModelToolSurface, modelToolArgumentError } from '../model-tools';
+import { grantDigest } from '../permission-grants';
 import type { AuthorizationCheckBinding } from '../runtime';
 import { InputSchemaCompiler } from '../schema-cache';
+import { type FileEditBatchSeal, fileEditBatchSeal } from '../storage/file-edit-batch';
 import type {
   AutoAuthorizationEvidence,
   ReadAuthorizationCheckInput,
@@ -60,6 +63,7 @@ import { AuthorizationCheckUnavailableError } from './authorization-check-feedba
 import {
   type AuthorizationChangeWait,
   AuthorizationRefreshRequired,
+  FileEditBatchRequiresIndependentReview,
   modeControlsChanged,
 } from './authorization-refresh';
 import { hostRevocationAuthorization } from './host-control';
@@ -203,6 +207,9 @@ export interface ExecutionScope {
   /** Core-owned interpretation of one durable human input, never a business grant. */
   humanInputInterpretation?: { inputCommandId: string; inputDigest: string };
   toolAdmission?: ToolDispatchAdmission;
+  fileEditBatch?: FileEditBatchPlan;
+  releaseFileEditBatch?: (executions: ReadonlyMap<string, ExecutionRecord>) => void;
+  checkIndependentFileEditFreshness?: () => Promise<void>;
   /** Size of the actual complete Model tool batch, supplied by Core rather than Tool input. */
   toolBatchSize?: number;
   modelRetry?: import('../model-attempt').ModelRetrySource;
@@ -376,6 +383,7 @@ export class UnifiedExecution {
       requirements: () => this.requirements(scope, 'dispatch', executionId),
       checkFreshness: scope.checkFreshness,
       checkpoint: scope.checkpoint,
+      ...('run' in scope && scope.fileEditBatch ? { fileEditBatch: scope.fileEditBatch } : {}),
       ...(this.options.authorizeParent
         ? {
             authorizeParent: (
@@ -1101,6 +1109,16 @@ export class UnifiedExecution {
       revision: decision.revision,
       ...(decision.materialReviewed ? { materialReviewed: true as const } : {}),
       ...(decision.snapshot === undefined ? {} : { snapshot: structuredClone(decision.snapshot) }),
+      ...(kind === 'tool'
+        ? {
+            acceptedGrant: decision.grant
+              ? {
+                  contractId: decision.grant.offer.contractId,
+                  scope: structuredClone(decision.grant.offer.scope),
+                }
+              : null,
+          }
+        : {}),
     };
   }
   async authorizationCheck(
@@ -1711,6 +1729,189 @@ export class UnifiedExecution {
       )
     ).result;
   }
+  async fileEditBatchExecution(
+    scope: ExecutionScope,
+    definition: ToolDefinition | undefined,
+    calls: readonly ToolCall[],
+    stepId: string,
+    modelExecutionId: string,
+    onSplit: (executions: ReadonlyMap<string, ExecutionRecord>) => void,
+  ): Promise<ReadonlyMap<string, ToolExecutionResult> | null> {
+    if (
+      !definition ||
+      definition.id !== 'files.edit' ||
+      definition.version !== '2' ||
+      !scope.bindings?.extensions.some(
+        (extension) =>
+          extension.id === 'builtin.files' &&
+          extension.version === '1' &&
+          extension.tools?.some(
+            (tool) => tool.id === definition.id && tool.version === definition.version,
+          ),
+      ) ||
+      !this.options.toolContext
+    )
+      return null;
+    const prepareTarget = scope.bindings.toolBehaviors?.find(
+      (behavior) =>
+        behavior.capability.kind === 'tool' &&
+        behavior.capability.definitionId === definition.id &&
+        behavior.capability.definitionVersion === definition.version,
+    )?.fileEditBatchTarget;
+    if (!prepareTarget) return null;
+    const model = await this.options.store.getExecution(modelExecutionId);
+    if (
+      model?.kind !== 'model' ||
+      model.status !== 'succeeded' ||
+      model.modelDispatched !== true ||
+      model.runId !== scope.run.id ||
+      model.sessionId !== scope.run.sessionId ||
+      model.originStoreId !== scope.run.originStoreId ||
+      model.stepId !== stepId
+    )
+      throw new AgentError('file_edit_batch_binding_changed');
+    const base: Record<string, Json> = {
+      kind: 'model_decision',
+      modelExecutionId,
+      sources: JSON.parse(JSON.stringify(scope.decisionSources ?? [])) as Json,
+    };
+    const context = await this.options.toolContext(scope, definition, modelExecutionId, base);
+    const plans = await fileEditBatchPlans(modelExecutionId, calls, async (_call, input) => {
+      if (!this.validator.compile(definition.inputSchema)(input)) return null;
+      try {
+        return await prepareTarget(
+          {
+            kind: 'tool',
+            definitionId: definition.id,
+            definitionVersion: definition.version,
+            sessionId: scope.run.sessionId,
+            runId: scope.run.id,
+            executionId: modelExecutionId,
+            input,
+            signal: scope.signal,
+          },
+          context,
+        );
+      } catch {
+        scope.signal.throwIfAborted();
+        return null;
+      }
+    });
+    let plan: FileEditBatchPlan | undefined = plans.length === 1 ? plans[0] : undefined;
+    if (!plan || plan.members.length !== calls.length) return null;
+    try {
+      const verified = await prepareTarget(
+        {
+          kind: 'tool',
+          definitionId: definition.id,
+          definitionVersion: definition.version,
+          sessionId: scope.run.sessionId,
+          runId: scope.run.id,
+          executionId: modelExecutionId,
+          input: plan.members[0]!.input,
+          signal: scope.signal,
+        },
+        context,
+        plan.members.map(({ input }) => input),
+      );
+      if (verified?.slot === plan.slot && verified.baseline === plan.baseline && verified.counts)
+        plan = Object.freeze({ ...plan, counts: Object.freeze(verified.counts) });
+    } catch {
+      scope.signal.throwIfAborted();
+    }
+    const ids = calls.map(() => crypto.randomUUID());
+    const seal: FileEditBatchSeal = {
+      kind: 'file_edit_batch@1',
+      modelExecutionId,
+      leaderExecutionId: ids[0]!,
+      digest: plan.digest,
+      members: plan.members.map(({ id, input }) => ({
+        callId: id,
+        inputDigest: grantDigest(input),
+      })),
+    };
+    let source: Json = { ...base, fileEditBatch: seal as unknown as Json };
+    if (this.options.sealSource) source = await this.options.sealSource(scope, source);
+    const executions = await Promise.all(
+      plan.members.map((member, index) =>
+        this.prepare(scope, {
+          executionId: ids[index]!,
+          stepId,
+          callId: member.id,
+          kind: 'tool',
+          definitionId: definition.id,
+          definitionVersion: definition.version,
+          input: member.input,
+          decisionSource: source,
+        }),
+      ),
+    );
+    if (executions.some((execution, index) => execution.id !== ids[index]))
+      throw new AgentError('file_edit_batch_binding_changed');
+    let split = false;
+    const leader = await this.toolExecution(
+      {
+        ...scope,
+        fileEditBatch: plan,
+        releaseFileEditBatch: (originals) => {
+          split = true;
+          onSplit(originals);
+        },
+        checkIndependentFileEditFreshness: () =>
+          scope.checkFreshness?.(ids[0]!) ?? Promise.resolve(),
+        checkFreshness: async (executionId) => {
+          await scope.checkFreshness?.(executionId);
+          const policies = await Promise.all(
+            executions.map((execution) =>
+              (scope.bindings?.permissions ?? this.options.permissions).authorize({
+                kind: 'tool',
+                definitionId: definition.id,
+                definitionVersion: definition.version,
+                sessionId: scope.run.sessionId,
+                runId: scope.run.id,
+                executionId: execution.id,
+                input: execution.input,
+                signal: scope.signal,
+              }),
+            ),
+          );
+          const first = policies[0]!;
+          if (first.check) throw new FileEditBatchRequiresIndependentReview();
+          if (
+            policies.some(
+              (policy) =>
+                policy.check ||
+                (!policy.allowed && !policy.approval) ||
+                policy.allowed !== first.allowed ||
+                Boolean(policy.approval) !== Boolean(first.approval) ||
+                canonicalJson((policy.controlReads ?? []) as unknown as Json) !==
+                  canonicalJson((first.controlReads ?? []) as unknown as Json),
+            )
+          )
+            throw new AgentError('file_edit_batch_requires_independent_policy_review');
+        },
+      },
+      definition,
+      calls[0]!,
+      stepId,
+      modelExecutionId,
+      source,
+      executions[0],
+    );
+    const results = new Map<string, ToolExecutionResult>([[calls[0]!.id, leader]]);
+    if (split) return results;
+    for (const selected of executions.slice(1)) {
+      const member = await this.options.store.getExecution(selected.id);
+      if (member?.status !== leader.result.outcome || !member.result)
+        throw new AgentError('file_edit_batch_receipt_incomplete');
+      results.set(member.callId, {
+        result: member.result as unknown as ToolResult,
+        dispatched: false,
+      });
+    }
+    return results;
+  }
+
   async toolExecution(
     scope: ToolScope,
     definition: ToolDefinition | undefined,
@@ -1877,6 +2078,9 @@ export class UnifiedExecution {
     );
     try {
       if ('run' in scope) await scope.toolAdmission?.wait();
+      const batchSeal = fileEditBatchSeal(source);
+      if (batchSeal && (!('run' in scope) || scope.fileEditBatch?.digest !== batchSeal.digest))
+        throw new AgentError('file_edit_batch_binding_changed');
       if (!resuming) {
         const references =
           'run' in scope
@@ -2000,6 +2204,9 @@ export class UnifiedExecution {
             resourceCapacity: this.options.resources.capacity,
             dispatchAuthorization,
             runId: work.runId,
+            ...('run' in scope && scope.fileEditBatch
+              ? { fileEditBatch: scope.fileEditBatch }
+              : {}),
             modelInputTokenLimit:
               'run' in scope ? frozenModelInputLimit(scope.run.configuration) : undefined,
             reportProgress: progress.report,
@@ -2038,7 +2245,78 @@ export class UnifiedExecution {
           throw new AgentError('artifact_references_unavailable');
         await this.options.validateArtifacts(scope, result.artifactRefs);
       }
-    } catch (error) {
+    } catch (cause) {
+      let error = cause;
+      if (
+        !dispatched &&
+        !attempted &&
+        !scope.signal.aborted &&
+        'run' in scope &&
+        scope.fileEditBatch &&
+        scope.releaseFileEditBatch &&
+        cause instanceof FileEditBatchRequiresIndependentReview
+      ) {
+        const request: AuthorizationRequest = {
+          kind: 'tool',
+          sessionId: work.sessionId,
+          runId: work.runId,
+          executionId,
+          definitionId: definition.id,
+          definitionVersion: definition.version,
+          input,
+          signal: scope.signal,
+        };
+        const permissions = scope.bindings?.permissions ?? this.options.permissions;
+        let independent: ExecutionRecord | undefined;
+        try {
+          const current = await permissions.authorize(request);
+          if (!current.check) throw cause;
+          const owned = await this.options.store.getExecution(executionId);
+          if (!owned) throw new AgentError('execution_not_found');
+          const gate = new InteractionGate(
+            this.options.store,
+            permissions,
+            this.options.waitForChange,
+          );
+          await gate.retireFileEditBatchApproval(
+            this.interactionScope(scope, executionId),
+            owned,
+            current,
+          );
+          const originals = await this.options.store.splitUndispatchedFileEditBatch({
+            expectedStoreId: work.originStoreId,
+            owner: scope.owner,
+            executionId,
+            digest: scope.fileEditBatch.digest,
+            controlReads: current.controlReads,
+          });
+          independent = originals[0]!;
+          scope.releaseFileEditBatch(new Map(originals.map((member) => [member.callId, member])));
+        } catch (splitError) {
+          error = splitError;
+        }
+        if (independent) {
+          preparedTool?.dispose();
+          await progress.finish();
+          this.resetAuthorizationForRefresh(executionId);
+          return this.performTool(
+            {
+              ...scope,
+              fileEditBatch: undefined,
+              releaseFileEditBatch: undefined,
+              checkFreshness: scope.checkIndependentFileEditFreshness,
+              checkIndependentFileEditFreshness: undefined,
+            },
+            definition,
+            call,
+            stepId,
+            sourceExecutionId,
+            executionId,
+            independent.decisionSource,
+            independent,
+          );
+        }
+      }
       cancelledBeforeAdapter =
         !attempted &&
         !resuming &&

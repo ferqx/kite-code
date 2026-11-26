@@ -260,6 +260,32 @@ test('ordinary Shell evidence binds one original record, receipt, Job and applie
   ).toBe(false);
 });
 
+test('ordinary Shell evidence requires the exact numeric alias as well as the original record', () => {
+  const fixture = shellReferenceFixture();
+  const value = structuredClone(fixture.records[0]!.value);
+  const { ref } = value as { ref: { key: string } };
+  fixture.parent.result = { details: { ref, session_id: 7 } };
+  const numeric = { ...fixture.records[0]!, key: 'shell-session/7', value };
+  const verify = (extra: typeof fixture.records) =>
+    worktreeLiveShellReferenceEvidence(
+      fixture.job,
+      fixture.parent,
+      [...fixture.records, ...extra],
+      fixture.command,
+    );
+  expect(verify([numeric])).toMatchObject({
+    exactOriginalCommand: true,
+    uniqueOriginalRecordAndReceipt: true,
+  });
+  for (const candidates of [
+    [],
+    [{ ...numeric, key: 'shell-session/8' }],
+    [{ ...numeric, sessionId: 'another-session' }],
+    [numeric, numeric],
+  ])
+    expect(verify(candidates).uniqueOriginalRecordAndReceipt).toBe(false);
+});
+
 function outputPages(): ExecutionOutputPage[] {
   return [
     {

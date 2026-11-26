@@ -29,6 +29,7 @@ async function fixture(
   auto = false,
   reviewOutcome: 'approve_once' | 'reject' | 'hold' = 'approve_once',
   reviewFault: 'timeout' | 'incomplete' = 'timeout',
+  unregisteredCall = false,
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-mcp-'))),
     workspace = join(root, 'workspace');
@@ -189,7 +190,10 @@ async function fixture(
           ? { name: 'connect_mcp_server', input: { server_id: connectServer } }
           : (step === 1 && route !== 'remote-b') || (step === 0 && route === 'remote-b')
             ? remote
-              ? { name: remote.function.name, input: { value: 'exact' } }
+              ? {
+                  name: unregisteredCall ? 'mcp_local_unregistered_12345678' : remote.function.name,
+                  input: { value: 'exact' },
+                }
               : null
             : null;
       const chunk = {
@@ -452,12 +456,59 @@ test('Ask approvals separately bind connect Tool, connection Job and remote Tool
     await f.approve(job);
     const remote = await f.pending();
     expect(remote.definitionId).not.toBe(connect.definitionId);
-    expect(remote.request).toMatchObject({ policy: { effects: ['unknown'] } });
+    expect(remote.request).toMatchObject({
+      policy: {
+        effects: ['unknown'],
+        mcpApprovalNames: { serverName: 'local', toolName: 'effect' },
+      },
+    });
     expect(f.calls).toBe(0);
     expect(f.connections).toBe(1);
     await f.approve(remote);
     await f.runtime.waitForCommand('connect-a', { timeoutMs: 5000 });
     expect(f.calls).toBe(1);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+test('a model call with no registered MCP identity does not create an approval or dispatch a remote call', async () => {
+  const f = await fixture(true, true, 'local', false, 'approve_once', 'timeout', true);
+  try {
+    await f.run();
+    const connect = await f.pending();
+    expect(connect.definitionId).toBe('mcp.connect');
+    await f.approve(connect);
+    const job = await f.pending();
+    expect(job.definitionId).toBe('mcp.connection.local');
+    await f.approve(job);
+    await f.runtime.waitForCommand('connect-a', { timeoutMs: 5000 });
+    expect(f.connections).toBe(1);
+    expect(f.calls).toBe(0);
+    const cards = (
+      await f.store.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 'a' })
+    ).interactions;
+    expect(cards.map(({ id }) => id).sort()).toEqual([connect.id, job.id].sort());
+    const ordinary = (await f.store.listExecutions('a')).filter(
+      (item) => item.kind === 'tool' && item.id !== connect.executionId,
+    );
+    expect(ordinary).toHaveLength(1);
+    expect(ordinary[0]).toMatchObject({
+      status: 'failed',
+      definitionVersion: 'unavailable',
+      result: { outcome: 'failed', details: { code: 'tool_not_available' } },
+    });
+    expect(ordinary[0]!.authorization?.dispatched).not.toBe(true);
+    expect(f.requests).toHaveLength(3);
+    const messages = (await f.store.getView('a')).messages;
+    expect(
+      messages.some(
+        (message) =>
+          message.role === 'tool' &&
+          message.content === 'tool_not_available' &&
+          message.sourceIds?.includes(ordinary[0]!.id),
+      ),
+    ).toBe(true);
   } finally {
     await f.close();
   }

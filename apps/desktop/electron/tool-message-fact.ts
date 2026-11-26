@@ -657,6 +657,23 @@ export function nativeToolMessageFact({
   )
     call = undefined;
   const details = object(result.details);
+  // This structured receipt is written by the Store's atomic batch settlement for
+  // companion calls. Never infer a denial from result text or assign a second approval.
+  const fileEditBatchRejectedMember =
+    execution.definitionId === 'files.edit' &&
+    execution.definitionVersion === '2' &&
+    execution.status === 'failed' &&
+    execution.authorization?.dispatched !== true &&
+    !execution.authorization?.human &&
+    typeof execution.toolCallId === 'string' &&
+    execution.toolCallId === message.toolCallId &&
+    details?.kind === 'file_edit_batch@1' &&
+    details.code === 'approval_denied' &&
+    typeof details.leaderExecutionId === 'string' &&
+    details.leaderExecutionId !== '' &&
+    details.leaderExecutionId !== execution.id &&
+    typeof details.digest === 'string' &&
+    /^[a-f0-9]{64}$/.test(details.digest);
   const worktreeIssue = worktreeFailure(execution, run, details);
   const configuration = object(run?.configuration);
   const registered = Array.isArray(configuration?.tools)
@@ -927,6 +944,7 @@ export function nativeToolMessageFact({
     ...(result.modelImages !== undefined ? { images: nativeToolImages(execution) } : {}),
     ...reinspection,
     ...(decisionRefresh ? { decisionRefresh } : {}),
+    ...(fileEditBatchRejectedMember ? { fileEditBatchRejectedMember: true } : {}),
     ...(fileMissing ? { fileMissing: true } : {}),
     ...(fileCreated ? { fileCreated: true } : {}),
     ...(agentMessageAccepted ? { agentMessageAccepted: true } : {}),

@@ -37,6 +37,8 @@ Auto 复用沿既有 Command／policy evidence，不新增授权账本。已有�
 
 [统一 v1 审核回执](../../packages/agent/src/authorization-check-output.ts)在完整 EOF、stop、零 ToolCall 后由实际可信解释器产生，保存原 ModelOutput／正文摘要和通用 answer。Worker 核原目标、attempt、inputDigest、封存输入、原 Run 行为和私有 owner 来源，只消费 answer，不执行领域回调；内联和 Artifact 使用同一逻辑合同。普通模型输出、ToolResult 或 Extension records 不能自报回执；缺失、错绑定、不完整和晚到结果不批准。准确父 Tool→自身 Job 通过 owner 提供的通用 parent proof 核原父链、输入与当前权限；只有真实完成的材料审核提供 materialReviewed，grant／timeout 及其继承不伪造此事实。
 
+macOS 正式宿主的请求批准 Shell 使用归属原 Tool 的单次人工决定或当前有效的精确命令授权。只有经过可信行为核对的同一附着 Job 才能消费该证明；真实身份、当前策略与控制、批准或授权撤销状态仍在其最终派发中核验。此规则不对独立策略、非附着 Job 或其他平台放行。
+
 后续授权使用冻结 options／optionId、统一 GrantOffer 和稳定 reuseRevision。Shell 同命令、Files 精确位置 edit／write、worktree create 父目录直接子项及 remove 精确目标共用原接纳、grant、epoch 和最终派发事务。所有真实参与策略（含 already allowed）均须支持该能力／范围，AND 精确交集；缺支持只提供单次。来源完整 policy revision 保留，消费保存本次完整 revision 和准确 binding。范围／稳定绑定再次匹配可复用，clear 永久撤销原授权；隐藏选项不取消已有有效授权。资源取得后重新核当前事实，markDispatching 同事务核原选项、scopeDigest、消费 binding／许可位、epoch、控制与必要检查；SQL 不做领域 I/O。选择或复用范围授权后，worktree prepare 的固定 commit 或父锚点与批准范围失配时不启动 mutation，也不降级单次；原单次及 Auto 免审保持各自语义。
 
 当前 Store formatMajor=1，使用本轮独立 reviewed baseline。profile.json 的 schemaChecksum 在打开 SQLite 前排除不匹配的历史结构，数据库仍独立核完整 schema/checksum；不转换、清空或改写原库。API 保持 `/v1` 并原位替换字段，不保留旧答案／旧回执 reader；Tool／Job 定义和 worktree worker 协议版本保持。具体消费及撤销合同归[grant owner](../../packages/agent/src/storage/sqlite/permission-grants.README.md)。

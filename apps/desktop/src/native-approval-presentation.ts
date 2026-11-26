@@ -1,6 +1,6 @@
 import type { Interaction } from '@kite-ai/client';
 import type { InteractionSubmission } from '@kite-ai/ui';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isOrdinaryNativeApproval } from './native-approval-priority';
 import type { NativeAnswerMetadata, NativeState } from './native-bridge';
 
@@ -61,12 +61,35 @@ export type NativeApprovalNotice = {
   retryable: boolean;
 };
 
-type Attempt = { card: Interaction; phase: 'submitting' | 'unknown' | 'failed' | 'accepted' };
+const approvalReceiptWaitMs = 8000;
+type Attempt = {
+  card: Interaction;
+  phase: 'submitting' | 'unknown' | 'failed';
+  timer?: ReturnType<typeof setTimeout>;
+};
 
-export function useNativeApprovalPresentation(state: NativeState | undefined) {
+export function useNativeApprovalPresentation(
+  state: NativeState | undefined,
+  receiptWaitMs = approvalReceiptWaitMs,
+) {
   const attempts = useRef(new Map<string, Attempt>());
   const [, changed] = useState(0);
   const publish = () => changed((value) => value + 1);
+  useEffect(() => {
+    const current = attempts.current;
+    return () => {
+      for (const attempt of current.values()) clearTimeout(attempt.timer);
+      current.clear();
+    };
+  }, []);
+  useEffect(() => {
+    for (const attempt of attempts.current.values()) {
+      const phase = nativeApprovalSubmission(attempt.card, state)?.phase;
+      if (phase === 'accepted' || phase === 'failed') clearTimeout(attempt.timer);
+    }
+  }, [state]);
+  const received = (card: Interaction) =>
+    nativeApprovalSubmission(card, state)?.phase === 'accepted';
   const hidden = (card: Interaction) => {
     if (!isOrdinaryNativeApproval(card)) return false;
     const attempt = attempts.current.get(nativeApprovalKey(card));
@@ -79,14 +102,23 @@ export function useNativeApprovalPresentation(state: NativeState | undefined) {
     const attempt: Attempt = { card, phase: 'submitting' };
     attempts.current.set(key, attempt);
     publish(); // Synchronous lock, before IPC, receipt, execution or observation refresh.
+    attempt.timer = setTimeout(() => {
+      if (attempts.current.get(key) !== attempt) return;
+      // A missing reply is not proof of rejection. Keep the original locked, with
+      // a read-only recovery entry, even when the Main IPC never settles.
+      attempt.phase = 'unknown';
+      publish();
+    }, receiptWaitMs);
     try {
       await action();
-      attempt.phase = 'accepted';
+      // Only the verified Main/Service observation proves receipt.
     } catch (error) {
+      if (attempts.current.get(key) !== attempt) return;
+      clearTimeout(attempt.timer);
       const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
       attempt.phase = typeof code === 'string' && notSubmitted.has(code) ? 'failed' : 'unknown';
+      publish();
     }
-    publish();
   }
   const notices = new Map<string, NativeApprovalNotice>();
   const selection = state?.selection;
@@ -98,7 +130,11 @@ export function useNativeApprovalPresentation(state: NativeState | undefined) {
         card.presentationSessionId !== selection.session.id
       )
         return;
-      const phase = submission?.phase ?? attempt?.phase;
+      const phase =
+        attempt?.phase === 'unknown' &&
+        (!submission || submission.phase === 'saved' || submission.phase === 'submitting')
+          ? 'unknown'
+          : (submission?.phase ?? attempt?.phase);
       if (phase !== 'unknown' && phase !== 'failed') return;
       const key = nativeApprovalKey(card);
       if (
@@ -146,5 +182,5 @@ export function useNativeApprovalPresentation(state: NativeState | undefined) {
       });
     }
   }
-  return { hidden, submit, notices: [...notices.values()] };
+  return { hidden, received, submit, notices: [...notices.values()] };
 }

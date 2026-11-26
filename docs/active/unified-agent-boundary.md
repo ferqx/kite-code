@@ -10,7 +10,7 @@ Native 会话完成提醒的已读记录由[桌面私有 SQLite](../../apps/desk
 
 默认 Service 的模型代理选择归 [Service owner](../../apps/service/README.md)，不下沉到 AI／Core 或客户端。新 Run 的 `snapshot.modelTransport.digest` 只绑定宿主代理环境与系统选择的摘要；恢复前变化拒绝，旧无字段记录不追补。代理传输不改变模型请求、权限、工具身份、未知结果或零重放边界，也不把模型自动代理推广到 MCP 网络准入。
 
-批量 `web_fetch` 共享一个原 Tool Execution，每项使用独立请求 scope、输入下标审计和正文 Artifact。历史绑定恢复的版本边界见[默认 Web Fetch 装配](../../apps/service/README.md#默认-web-fetch-装配)。
+批量 `web_fetch` 共享一个原 Tool Execution，每项使用独立请求 scope、输入下标审计和正文 Artifact。历史绑定恢复的版本边界见[默认 Web Fetch 装配](../../apps/service/README.md#默认-web-fetch-装配)。 同源范围授权经过既有 Store 核验，由 Core 只向已派发 Tool 传实际采用的范围或明确无范围授权；不作为 Job、Model 或输入身份。受范围约束的 Web 跳转在 DNS 前禁止越过精确来源，宿主的地址、准入和审计继续独立生效。
 
 普通 `web_fetch` 的默认代理 DNS 复核策略封存于 `snapshot.web.transport`，冷恢复在凭据和派发前核对。由 Agent 对已授权的单跳确认目标与解析器选中同一代理，再按 [Web owner](../../packages/agent/src/tools/web-fetch/README.md) 的候选规则复核；DNS 服务只取得域名，目标 socket 仍依赖新响应的全候选公网检查与原持久审计。
 
@@ -64,7 +64,7 @@ Service 的最终 listener 关闭位于 Runtime、已接纳 HTTP 资源、正文
 
 自动权限检查沿[权限 owner](../../packages/agent/src/permissions/README.md)与 Core 的 `authorization.check`／`authorizationCheck` 执行，只记录原 Session 内无 Run Model，不创建子 Agent。工具包导出实际执行定义和可信行为，宿主静态登记并封存准确 kind／id／version、contractRef／configurationDigest；Tool.execute/resume 与 Job 生命周期不变。默认 policy 明确选择 check.behavior，独立 checker／人工上限保留，Loop 不按工具名选择审核算法。
 
-[统一 v1 回执](../../packages/agent/src/authorization-check-output.ts)在完整 EOF、stop、零 ToolCall 后由选中解释器产生。Worker 核目标／attempt／inputDigest、Run 冻结行为、sealed input、完整 ModelOutput 和私有 owner 来源，再消费通用 answer。默认 Shell 的超时停止要求进入原检查，截止后禁止成功结算、人工兜底或派发依据。准确父 Tool→自身 Job 复用原审核或有效批准。旧超时依据仍可按原合同读取。具体边界归 [Store owner](../../packages/agent/src/storage/README.md#只读授权观察)。
+[统一 v1 回执](../../packages/agent/src/authorization-check-output.ts)在完整 EOF、stop、零 ToolCall 后由选中解释器产生。Worker 核目标／attempt／inputDigest、Run 冻结行为、sealed input、完整 ModelOutput 和私有 owner 来源，再消费通用 answer。默认 Shell 的超时停止要求进入原检查，截止后禁止成功结算、人工兜底或派发依据。准确父 Tool→自身 Job 复用原审核或有效批准；macOS 请求批准的准确附着 Shell 复核原 Tool 的默认人工批准，不重复出卡，范围与最终派发约束见[授权契约](authorization.md)。旧超时依据仍可按原合同读取。具体边界归 [Store owner](../../packages/agent/src/storage/README.md#只读授权观察)。
 
 统一 options／optionId 和结构化 grant 复用原 Interaction 接纳、Session epoch 和 markDispatching 事务，领域范围由 Shell／Files／worktree owner 提供，所有参与策略精确 AND 稳定绑定。当前硬限制、独立 checker、必要条件、控制、owner 与每次真实文件／Git 条件继续核；worktree 固定 commit／父锚点失配零 mutation且不能降级单次。当前 Store major=1 与本轮独立 reviewed baseline 在 preflight 拒绝不匹配的历史结构，不转换或改写旧用户库；公开 API 保持 `/v1` 原位替换审批字段，旧格式 reader／双答案不进入新版路径。原通用执行、取消和 unknown 零重放合同保持。验证归[非内置格式](../../packages/agent/test/isolated/execution/tool-behavior-review.test.ts)、[grant owner](../../packages/agent/src/storage/sqlite/permission-grants.README.md)与[worktree 实际桥](../../packages/agent/test/isolated/execution/worktree-authorization.test.ts)。
 

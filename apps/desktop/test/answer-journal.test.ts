@@ -420,3 +420,53 @@ test('saved answer association becomes unavailable when the same Session context
   expect(f.posts()).toBe(1);
   expect(f.gets()).toBe(0);
 });
+
+for (const first of ['post', 'lookup'] as const) {
+  for (const phase of ['accepted', 'failed'] as const) {
+    test(`verified ${phase} from ${first} survives the other in-flight answer operation failing`, async () => {
+      const f = fixture();
+      const c = f.controller();
+      const transport = Promise.withResolvers<Command>();
+      const lookup = Promise.withResolvers<Command>();
+      const started = Promise.withResolvers<void>();
+      let posts = 0;
+      let gets = 0;
+      f.client.answerInteraction = async () => {
+        posts++;
+        started.resolve();
+        return transport.promise;
+      };
+      f.client.getCommand = async () => {
+        gets++;
+        return lookup.promise;
+      };
+      await c.selectSession('s');
+      const submitting = c.answerInteraction(card, {
+        kind: 'approval',
+        decision: 'approve',
+        optionId: 'once',
+      });
+      await started.promise;
+      const checking = c.lookupInteractionAnswer(card);
+      while (!gets) await Bun.sleep(0);
+      const exact = f.correct();
+      if (phase === 'failed') exact.status = 'rejected';
+      if (first === 'post') {
+        transport.resolve(exact);
+        await expect(submitting).resolves.toEqual(exact);
+        lookup.reject(new Error('late GET unavailable'));
+        await expect(checking).rejects.toThrow('late GET unavailable');
+      } else {
+        lookup.resolve(exact);
+        await expect(checking).resolves.toEqual(exact);
+        transport.reject(new Error('late POST receipt unavailable'));
+        await expect(submitting).resolves.toEqual(exact);
+      }
+      expect(c.interactionSubmissions[0]).toMatchObject({ phase, receipt: exact });
+      expect(f.data.answers()[0]!.phase).toBe(phase);
+      if (phase === 'failed') expect(f.data.answers()[0]!.verifiedRejection).toBe(true);
+      expect(posts).toBe(1);
+      expect(gets).toBe(1);
+    });
+  }
+}

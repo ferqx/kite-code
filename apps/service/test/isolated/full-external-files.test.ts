@@ -54,10 +54,20 @@ type Paths = {
   foreignOutput: string;
 };
 type Call = { name: string; input: Json };
-type Program = (body: Body, step: number, actor: 'root' | 'child', paths: Paths) => Call | null;
+type Program = (
+  body: Body,
+  step: number,
+  actor: 'root' | 'child',
+  paths: Paths,
+) => Call | readonly Call[] | null;
 
 async function fixture(options: {
   mode?: 'full' | 'accept_edits' | 'auto';
+  editOnly?: boolean;
+  failBatchSnapshot?: boolean;
+  afterBatchPublication?: () => Promise<void>;
+  afterBatchSettlement?: () => Promise<void>;
+  fixtureParent?: string;
   forbidHumanApproval?: boolean;
   childFileCeiling?: 'approval' | 'deny';
   beforeDispatch?: 'demote' | 'untrust';
@@ -65,12 +75,18 @@ async function fixture(options: {
   humanAnswer?: 'approve' | 'deny';
   task?: (paths: Paths) => string;
   beforeAnswer?: (paths: Paths) => void;
+  batchAnswer?: (
+    card: import('@kite-ai/agent/storage').InteractionRecord,
+    paths: Paths,
+  ) => 'approve' | 'deny' | 'hold';
   decisionTool?: string;
   retryTimeouts?: number;
   beforeReview?: (body: Body, paths: Paths) => void | Promise<void>;
   program: Program;
 }) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-full-external-files-')));
+  const root = realpathSync(
+    mkdtempSync(join(options.fixtureParent ?? tmpdir(), 'kite-full-external-files-')),
+  );
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'profiles'), profile: 'test' });
@@ -115,7 +131,8 @@ async function fixture(options: {
           !options.decisionTool || review?.target?.definitionId === options.decisionTool
             ? options.decision
             : 'approve';
-        if (decision === 'timeout' || decision === 'cancel') await Bun.sleep(300);
+        if (decision === 'timeout') await Bun.sleep(options.decisionTool ? 1800 : 300);
+        if (decision === 'cancel') await Bun.sleep(300);
         if (decision === 'unavailable')
           return new Response('controlled unavailable reviewer', { status: 503 });
         const answer =
@@ -152,14 +169,16 @@ async function fixture(options: {
         `${frame(
           call
             ? {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: `call-${actor}-${step}`,
+                tool_calls: (Array.isArray(call) ? call : [call as Call]).map(
+                  (member: Call, index) => ({
+                    index,
+                    id: Array.isArray(call)
+                      ? `call-${actor}-${step}-${index}`
+                      : `call-${actor}-${step}`,
                     type: 'function',
-                    function: { name: call.name, arguments: JSON.stringify(call.input) },
-                  },
-                ],
+                    function: { name: member.name, arguments: JSON.stringify(member.input) },
+                  }),
+                ),
               }
             : { content: 'Controlled file journey finished.' },
           null,
@@ -172,7 +191,11 @@ async function fixture(options: {
   writeFileSync(
     configurationPath,
     JSON.stringify({
-      autoApproval: { timeoutMs: options.decision === 'timeout' ? 50 : 8000 },
+      // A targeted timeout still needs enough budget for its independently
+      // approved prerequisite read. Only the exact target's response is delayed.
+      autoApproval: {
+        timeoutMs: options.decision === 'timeout' ? (options.decisionTool ? 600 : 50) : 8000,
+      },
       modelId: 'fixed',
       models: [
         {
@@ -182,14 +205,10 @@ async function fixture(options: {
           baseURL: `${provider.url.href}v1`,
         },
       ],
-      tools: [
-        'files.read',
-        'files.write',
-        'files.edit',
-        'task.spawn',
-        'task.events',
-        'task.list',
-      ].map((id) => ({ id })),
+      tools: (options.editOnly
+        ? ['files.read', 'files.edit']
+        : ['files.read', 'files.write', 'files.edit', 'task.spawn', 'task.events', 'task.list']
+      ).map((id) => ({ id })),
     }),
   );
   const host = createDefaultProcessConfiguration({
@@ -230,6 +249,18 @@ async function fixture(options: {
   let management: ReturnType<NonNullable<typeof host.permissionManagement>>;
   const observedStore = new Proxy(store, {
     get(target, property) {
+      if (property === 'finishExecution' && options.afterBatchSettlement) {
+        return async (input: Parameters<typeof store.finishExecution>[0]) => {
+          const receipt = await store.finishExecution(input);
+          if (
+            receipt.definitionId === 'files.edit' &&
+            receipt.status === 'succeeded' &&
+            (receipt.decisionSource as Record<string, Json>).fileEditBatch
+          )
+            await options.afterBatchSettlement!();
+          return receipt;
+        };
+      }
       if (property !== 'markDispatching') return Reflect.get(target, property);
       return async (input: Parameters<typeof store.markDispatching>[0]) => {
         const actual = await store.getExecution(input.executionId);
@@ -278,10 +309,28 @@ async function fixture(options: {
       };
     },
   });
+  const observedArtifacts =
+    options.failBatchSnapshot || options.afterBatchPublication
+      ? new Proxy(artifacts, {
+          get(target, property) {
+            if (property !== 'publish') return Reflect.get(target, property);
+            return async (input: Parameters<typeof target.publish>[0]) => {
+              const execution =
+                input.scope.kind === 'execution' ? await store.getExecution(input.scope.id) : null;
+              if (input.mediaType === 'text/plain' && execution?.definitionId === 'files.edit') {
+                if (options.failBatchSnapshot)
+                  throw new Error('fixture-cannot-confirm-published-file');
+                await options.afterBatchPublication?.();
+              }
+              return target.publish(input);
+            };
+          },
+        })
+      : artifacts;
   const runtime = createRuntime({
     ...host,
     store: observedStore,
-    artifacts,
+    artifacts: observedArtifacts,
     workspaceSerialLocks: locks,
     permissions: host.permissions!,
   });
@@ -316,6 +365,7 @@ async function fixture(options: {
     store,
     storeId,
     configurationPath,
+    management,
     databasePath: profile.databasePath,
     profilePath: profile.profilePath,
     requests,
@@ -348,6 +398,8 @@ async function fixture(options: {
         if (options.forbidHumanApproval) expect(interactions).toEqual([]);
         for (const card of interactions) {
           options.beforeAnswer?.(paths);
+          const decision = options.batchAnswer?.(card, paths);
+          if (decision === 'hold') continue;
           await runtime.answerInteraction({
             expectedStoreId: storeId,
             commandId: `answer-${card.id}`,
@@ -356,7 +408,7 @@ async function fixture(options: {
             expectedRevision: card.revision,
             subjectId: 'owner',
             answer:
-              (options.humanAnswer ?? options.decision) === 'deny'
+              (decision ?? options.humanAnswer ?? options.decision) === 'deny'
                 ? { kind: 'approval', decision: 'deny' }
                 : { kind: 'approval', decision: 'approve', optionId: 'once' },
           });
@@ -375,6 +427,481 @@ async function fixture(options: {
     },
   };
 }
+
+for (const scenario of ['allow', 'deny', 'drift'] as const) {
+  test(`same-file batch ${scenario}: one exact human card, one durable result for each original call`, async () => {
+    const cards: import('@kite-ai/agent/storage').InteractionRecord[] = [];
+    const original = 'const a = 1;\r\nconst b = 2;\r\n// original\r\n';
+    const drifted = original.replace('// original', '// changed elsewhere');
+    const f = await fixture({
+      mode: 'accept_edits',
+      editOnly: true,
+      program: (_body, step, _actor, paths) => {
+        if (step === 0) return { name: 'read_file', input: { path: paths.target } };
+        if (step === 1)
+          return [
+            {
+              name: 'edit_file',
+              input: { path: paths.target, old_string: 'a = 1', new_string: 'a = 11' },
+            },
+            {
+              name: 'edit_file',
+              input: { path: paths.target, old_string: 'b = 2', new_string: 'b = 22' },
+            },
+          ];
+        return null;
+      },
+      batchAnswer(card, paths) {
+        if (card.definitionId !== 'files.edit') return 'approve';
+        cards.push(card);
+        if (scenario === 'drift') writeFileSync(paths.target, drifted);
+        return scenario === 'deny' ? 'deny' : 'approve';
+      },
+    });
+    try {
+      mkdirSync(join(f.target, '..'), { recursive: true });
+      writeFileSync(f.target, original);
+      await f.run();
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.request).toMatchObject({
+        options: [{ kind: 'once', optionId: 'once' }],
+        fileEditBatch: {
+          kind: 'file_edit_batch@1',
+          counts: { added: 2, removed: 2 },
+          members: [
+            { find: 'a = 1', replace: 'a = 11', counts: { added: 1, removed: 1 } },
+            { find: 'b = 2', replace: 'b = 22', counts: { added: 1, removed: 1 } },
+          ],
+        },
+      });
+      const edits = (await f.store.listExecutions('s')).filter(
+        (value) => value.definitionId === 'files.edit',
+      );
+      expect(edits).toHaveLength(2);
+      expect(edits.map((row) => row.status)).toEqual(
+        Array(2).fill(scenario === 'allow' ? 'succeeded' : 'failed'),
+      );
+      expect(edits.filter((row) => row.authorization?.dispatched)).toHaveLength(
+        scenario === 'deny' ? 0 : 1,
+      );
+      expect(readFileSync(f.target, 'utf8')).toBe(
+        scenario === 'allow'
+          ? original.replace('a = 1', 'a = 11').replace('b = 2', 'b = 22')
+          : scenario === 'drift'
+            ? drifted
+            : original,
+      );
+      const next = f.requests.at(-1)?.messages.filter((message) => message.role === 'tool');
+      const ids = next?.map(
+        (item) => (item as typeof item & { tool_call_id: string }).tool_call_id,
+      );
+      expect(ids).toContain('call-root-1-0');
+      expect(ids).toContain('call-root-1-1');
+    } finally {
+      await f.close();
+    }
+  }, 20000);
+}
+
+for (const action of ['stop', 'auto'] as const) {
+  test(`pending same-file batch ${action} preserves the original tools and retires the exact card`, async () => {
+    const pending = Promise.withResolvers<import('@kite-ai/agent/storage').InteractionRecord>();
+    const f = await fixture({
+      mode: 'accept_edits',
+      editOnly: true,
+      program: (_body, step, _actor, paths) =>
+        step === 0
+          ? { name: 'read_file', input: { path: paths.target } }
+          : step === 1
+            ? [
+                {
+                  name: 'edit_file',
+                  input: { path: paths.target, old_string: 'a = 1', new_string: 'a = 11' },
+                },
+                {
+                  name: 'edit_file',
+                  input: { path: paths.target, old_string: 'b = 2', new_string: 'b = 22' },
+                },
+              ]
+            : null,
+      batchAnswer(card) {
+        if (card.definitionId !== 'files.edit') return 'approve';
+        pending.resolve(card);
+        return 'hold';
+      },
+    });
+    try {
+      const original = 'a = 1\nb = 2\n';
+      mkdirSync(join(f.target, '..'), { recursive: true });
+      writeFileSync(f.target, original);
+      const run = f.run();
+      // Surface an early failure instead of waiting for an unproduced card.
+      const card = await Promise.race([
+        pending.promise,
+        run.then(() => {
+          throw Error('missing-batch-card');
+        }),
+      ]);
+      const edits = async () =>
+        (await f.store.listExecutions('s')).filter((row) => row.definitionId === 'files.edit');
+      const before = await edits();
+      expect(before).toHaveLength(2);
+      expect(before.every((row) => row.status === 'planned')).toBe(true);
+      if (action === 'stop') {
+        await f.runtime.cancelCommand({
+          expectedStoreId: f.storeId,
+          sessionId: 's',
+          subjectId: 'owner',
+          commandId: 'stop-pending-batch',
+          targetCommandId: 'work',
+        });
+      } else {
+        const scope = { expectedStoreId: f.storeId, sessionId: 's', subjectId: 'owner' };
+        const mode = await f.management.readMode(scope);
+        await f.management.setMode({
+          ...scope,
+          commandId: 'batch-switch-auto',
+          mode: 'auto',
+          makeDefault: false,
+          ifRevision: mode.revision,
+          ifDefaultRevision: mode.defaultRevision,
+        });
+      }
+      await run;
+      const after = await edits();
+      expect(after.map(({ id }) => id).sort()).toEqual(before.map(({ id }) => id).sort());
+      const saved = await f.store.getInteraction({
+        expectedStoreId: f.storeId,
+        sessionId: 's',
+        interactionId: card.id,
+      });
+      expect(saved?.state).toBe('cancelled');
+      if (action === 'stop') {
+        expect(after.map(({ status }) => status)).toEqual(['cancelled', 'cancelled']);
+        expect(readFileSync(f.target, 'utf8')).toBe(original);
+        expect(after.some((row) => row.authorization?.dispatched)).toBe(false);
+        expect(f.reviewRequests()).toBe(0);
+      } else {
+        expect(f.reviewRequests()).toBe(2);
+        expect(after.map(({ status }) => status).sort()).toEqual(['failed', 'succeeded']);
+        expect(after.every((row) => row.authorization?.check !== undefined)).toBe(true);
+        expect(readFileSync(f.target, 'utf8')).toBe(original.replace('a = 1', 'a = 11'));
+      }
+      const messages = (await f.store.listMessages('s')).filter(
+        (message) =>
+          message.role === 'tool' && before.some(({ callId }) => callId === message.toolCallId),
+      );
+      expect(messages.map(({ toolCallId }) => toolCallId).sort()).toEqual(
+        before.map(({ callId }) => callId).sort(),
+      );
+    } finally {
+      await f.close();
+    }
+  }, 20000);
+}
+
+const restartPhases = ['pending', 'published', 'committed'] as const;
+const restartFixtureName = 'owned file batch restart child barrier';
+const processPhase = process.env.KITE_TEST_FILE_BATCH_RESTART as
+  | (typeof restartPhases)[number]
+  | undefined;
+const processParent = process.env.KITE_TEST_FILE_BATCH_RESTART_ROOT;
+const restartSeed = 'a = 1\nb = 2\n';
+const restartUpdate = 'a = 11\nb = 22\n';
+const restartProgram: Program = (_body, step, _actor, paths) =>
+  step === 0
+    ? { name: 'read_file', input: { path: paths.target } }
+    : step === 1
+      ? [
+          {
+            name: 'edit_file',
+            input: { path: paths.target, old_string: 'a = 1', new_string: 'a = 11' },
+          },
+          {
+            name: 'edit_file',
+            input: { path: paths.target, old_string: 'b = 2', new_string: 'b = 22' },
+          },
+        ]
+      : null;
+
+test('same-file batch stop after confirmed publication keeps both successful receipts', async () => {
+  const atPublication = Promise.withResolvers<void>();
+  const resumeReceipt = Promise.withResolvers<void>();
+  const f = await fixture({
+    mode: 'accept_edits',
+    editOnly: true,
+    program: restartProgram,
+    async afterBatchPublication() {
+      atPublication.resolve();
+      await resumeReceipt.promise;
+    },
+  });
+  try {
+    mkdirSync(join(f.target, '..'), { recursive: true });
+    writeFileSync(f.target, restartSeed);
+    const finished = f.run();
+    await Promise.race([
+      atPublication.promise,
+      finished.then(() => {
+        throw Error('publication was not held');
+      }),
+    ]);
+    expect(readFileSync(f.target, 'utf8')).toBe(restartUpdate);
+    try {
+      await f.runtime.cancelCommand({
+        expectedStoreId: f.storeId,
+        sessionId: 's',
+        subjectId: 'owner',
+        commandId: 'stop-published-batch',
+        targetCommandId: 'work',
+      });
+    } finally {
+      resumeReceipt.resolve();
+    }
+    await finished;
+    const after = (await f.store.listExecutions('s')).filter(
+      (row) => row.definitionId === 'files.edit',
+    );
+    expect(after.map(({ status }) => status)).toEqual(['succeeded', 'succeeded']);
+    expect(after.filter((row) => row.authorization?.dispatched)).toHaveLength(1);
+    expect(after.every((row) => row.cancelRequestedAt !== null)).toBe(true);
+    expect(readFileSync(f.target, 'utf8')).toBe(restartUpdate);
+    expect(f.requests).toHaveLength(2);
+  } finally {
+    resumeReceipt.resolve();
+    await f.close();
+  }
+}, 20000);
+
+if (processPhase && processParent && restartPhases.includes(processPhase)) {
+  test(restartFixtureName, async () => {
+    const pending = Promise.withResolvers<import('@kite-ai/agent/storage').InteractionRecord>();
+    const stopped = Promise.withResolvers<void>();
+    const held = async () => {
+      await capture();
+      return stopped.promise;
+    };
+    const f = await fixture({
+      fixtureParent: processParent,
+      mode: 'accept_edits',
+      editOnly: true,
+      program: restartProgram,
+      afterBatchPublication: processPhase === 'published' ? held : undefined,
+      afterBatchSettlement: processPhase === 'committed' ? held : undefined,
+      batchAnswer(card) {
+        if (card.definitionId !== 'files.edit') return 'approve';
+        pending.resolve(card);
+        return processPhase === 'pending' ? 'hold' : 'approve';
+      },
+    });
+    async function capture() {
+      const card = await pending.promise;
+      const edits = (await f.store.listExecutions('s')).filter(
+        (row) => row.definitionId === 'files.edit',
+      );
+      expect(edits).toHaveLength(2);
+      const dispatched = edits.filter((row) => row.authorization?.dispatched).length;
+      expect(dispatched).toBe(processPhase === 'pending' ? 0 : 1);
+      expect(edits.map(({ status }) => status).sort()).toEqual(
+        processPhase === 'pending'
+          ? ['planned', 'planned']
+          : processPhase === 'published'
+            ? ['dispatching', 'planned']
+            : ['succeeded', 'succeeded'],
+      );
+      expect(readFileSync(f.target, 'utf8')).toBe(
+        processPhase === 'pending' ? restartSeed : restartUpdate,
+      );
+      const session = (await f.store.getSession('s'))!;
+      const ready = join(processParent!, 'ready.json');
+      writeFileSync(
+        ready + '.tmp',
+        JSON.stringify({
+          pid: process.pid,
+          storeId: f.storeId,
+          generation: session.ownerGeneration,
+          root: f.root,
+          target: f.target,
+          card: card.id,
+          edits: edits.map(({ id, callId }) => ({ id, callId })),
+        }),
+        { mode: 0o600 },
+      );
+      renameSync(ready + '.tmp', ready);
+    }
+    try {
+      mkdirSync(join(f.target, '..'), { recursive: true });
+      writeFileSync(f.target, restartSeed);
+      const run = f.run();
+      if (processPhase === 'pending') {
+        await Promise.race([
+          pending.promise,
+          run.then(() => {
+            throw Error('missing-batch-card');
+          }),
+        ]);
+        await capture();
+      }
+      await stopped.promise;
+    } finally {
+      await f.close();
+    }
+  }, 30000);
+}
+
+for (const phase of restartPhases) {
+  test.skipIf(process.platform === 'win32')(
+    `same-file batch owned restart from ${phase} preserves shared effects and original receipts`,
+    async () => {
+      const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-batch-restart-')));
+      const child = Bun.spawn(
+        [process.execPath, 'test', import.meta.path, '--test-name-pattern', restartFixtureName],
+        {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: {
+            ...process.env,
+            KITE_TEST_FILE_BATCH_RESTART: phase,
+            KITE_TEST_FILE_BATCH_RESTART_ROOT: parent,
+          },
+        },
+      );
+      const stdout = new Response(child.stdout).text(),
+        stderr = new Response(child.stderr).text();
+      let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+      let runtime: ReturnType<typeof createRuntime> | undefined;
+      let artifacts: ReturnType<typeof createArtifactStore> | undefined;
+      try {
+        const path = join(parent, 'ready.json');
+        const deadline = Date.now() + 12000;
+        while (!existsSync(path)) {
+          if (child.exitCode !== null) throw Error((await stdout) + (await stderr));
+          if (Date.now() >= deadline) throw Error('restart barrier not reached');
+          await Bun.sleep(10);
+        }
+        const ready = JSON.parse(readFileSync(path, 'utf8')) as {
+          pid: number;
+          root: string;
+          target: string;
+          storeId: string;
+          generation: string;
+          card: string;
+          edits: { id: string; callId: string }[];
+        };
+        expect(ready.pid).toBe(child.pid);
+        expect(ready.root.startsWith(parent + '/')).toBe(true);
+        child.kill('SIGKILL');
+        expect(await child.exited).not.toBe(0);
+        const profile = selectProfile({ dataRoot: join(ready.root, 'profiles'), profile: 'test' });
+        store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
+        artifacts = createArtifactStore({ profile, store });
+        runtime = createRuntime({
+          store,
+          artifacts,
+          permissions: {
+            async authorize() {
+              throw Error('recovery_must_not_dispatch');
+            },
+          },
+        });
+        const ownership = { expectedStoreId: ready.storeId, sessionId: 's', subjectId: 'owner' };
+        const reconciled = await runtime.reconcileSession({
+          ...ownership,
+          expectedOwnerGeneration: ready.generation,
+          commandId: 'reconcile-owned-batch',
+        });
+        const expected =
+          phase === 'pending'
+            ? 'cancelled'
+            : phase === 'published'
+              ? 'outcome_unknown'
+              : 'succeeded';
+        const observe = async () =>
+          Promise.all(ready.edits.map(({ id }) => store!.getExecution(id)));
+        expect((await observe()).map((row) => row?.status)).toEqual([expected, expected]);
+        if (reconciled.report)
+          await runtime.recoverSession({
+            ...ownership,
+            expectedOwnerGeneration: reconciled.report.generation,
+            commandId: 'recover-owned-batch',
+            decision: 'interrupt',
+          });
+        const after = await observe();
+        expect(after.map((row) => row?.status)).toEqual([expected, expected]);
+        expect(after.filter((row) => row?.authorization?.dispatched)).toHaveLength(
+          phase === 'pending' ? 0 : 1,
+        );
+        const messages = (await store.listMessages('s')).filter(
+          (m) => m.role === 'tool' && ready.edits.some(({ callId }) => m.toolCallId === callId),
+        );
+        expect(messages.map(({ toolCallId }) => toolCallId).sort()).toEqual(
+          ready.edits.map(({ callId }) => callId).sort(),
+        );
+        expect(readFileSync(ready.target, 'utf8')).toBe(
+          phase === 'pending' ? restartSeed : restartUpdate,
+        );
+        if (phase === 'pending')
+          expect(
+            (await store.getInteraction({ ...ownership, interactionId: ready.card }))?.state,
+          ).toBe('cancelled');
+      } finally {
+        if (child.exitCode === null) child.kill('SIGKILL');
+        await child.exited;
+        await Promise.all([stdout, stderr]);
+        await runtime?.close();
+        await artifacts?.close();
+        await store?.close();
+        rmSync(parent, { recursive: true, force: true });
+      }
+    },
+    25000,
+  );
+}
+
+test('same-file batch reports one unknown effect for both original calls and does not write again', async () => {
+  const original = 'alpha 1\nbeta 2\n';
+  const updated = 'alpha 11\nbeta 22\n';
+  const f = await fixture({
+    mode: 'accept_edits',
+    editOnly: true,
+    failBatchSnapshot: true,
+    program: (_body, step, _actor, paths) =>
+      step === 0
+        ? { name: 'read_file', input: { path: paths.target } }
+        : step === 1
+          ? [
+              {
+                name: 'edit_file',
+                input: { path: paths.target, old_string: 'alpha 1', new_string: 'alpha 11' },
+              },
+              {
+                name: 'edit_file',
+                input: { path: paths.target, old_string: 'beta 2', new_string: 'beta 22' },
+              },
+            ]
+          : null,
+  });
+  try {
+    mkdirSync(join(f.target, '..'), { recursive: true });
+    writeFileSync(f.target, original);
+    await f.run();
+    const snapshot = (await f.store.listExecutions('s')).filter(
+      (value) => value.definitionId === 'files.edit',
+    );
+    expect(snapshot.map((value) => value.status)).toEqual(['outcome_unknown', 'outcome_unknown']);
+    expect(snapshot.filter((value) => value.authorization?.dispatched)).toHaveLength(1);
+    expect(readFileSync(f.target, 'utf8')).toBe(updated);
+    const evidence = statSync(f.target, { bigint: true });
+    await Bun.sleep(150);
+    expect(
+      (await f.store.listExecutions('s')).filter((value) => value.definitionId === 'files.edit'),
+    ).toEqual(snapshot);
+    expect(statSync(f.target, { bigint: true }).ino).toBe(evidence.ino);
+    expect(statSync(f.target, { bigint: true }).mtimeNs).toBe(evidence.mtimeNs);
+  } finally {
+    await f.close();
+  }
+}, 20000);
 
 for (const mode of ['accept_edits', 'auto', 'full'] as const) {
   test(`${mode} ordinary missing reads reach the next Model as observations with the final unified Files catalogue`, async () => {
@@ -1040,6 +1567,7 @@ for (const decision of ['approve', 'deny', 'timeout'] as const) {
       await f.run();
       const row = (await f.store.listExecutions('s')).find((e) => e.definitionId === 'files.edit')!;
       expect(row.authorization?.dispatched).toBe(decision === 'approve');
+      if (decision === 'timeout') expect(row.authorization?.check?.decision).toBe('unavailable');
       expect(readFileSync(f.target, 'utf8')).toBe(decision === 'approve' ? 'after' : 'before');
     } finally {
       await f.close();

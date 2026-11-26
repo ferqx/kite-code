@@ -4,6 +4,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
+import { grantDigest } from '../../../src/permission-grants';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json, RequirementRef } from '../../../src/storage/types';
 
@@ -671,5 +672,115 @@ test('missing or mismatched cancelled-business seals cannot be used as technical
     } finally {
       await f.close();
     }
+  }
+});
+
+test('explicit run stop preserves a confirmed file batch denial on every original call', async () => {
+  const f = await fixture();
+  try {
+    const modelSource = { kind: 'model_request', requestId: 'model' };
+    await f.plan('model', 'model', modelSource);
+    await f.dispatch('model', modelSource);
+    const inputs = [
+      { path: 'sample.txt', old_string: 'a', new_string: 'A' },
+      { path: 'sample.txt', old_string: 'b', new_string: 'B' },
+    ];
+    const calls = inputs.map((input, index) => ({
+      id: 'edit-' + index,
+      name: 'files.edit',
+      arguments: JSON.stringify(input),
+    }));
+    await f.store.finishExecution({
+      ...f.owned,
+      executionId: 'model',
+      status: 'succeeded',
+      result: { content: '', toolCalls: calls },
+      message: { role: 'assistant', content: '', toolCalls: calls, sourceIds: ['model'] },
+    });
+    const source = {
+      kind: 'model_decision',
+      modelExecutionId: 'model',
+      fileEditBatch: {
+        kind: 'file_edit_batch@1',
+        modelExecutionId: 'model',
+        leaderExecutionId: 'edit-0',
+        digest: grantDigest({ test: 'exact-stopped-batch' }),
+        members: inputs.map((input, i) => ({
+          callId: calls[i]!.id,
+          inputDigest: grantDigest(input),
+        })),
+      },
+    };
+    for (const [index, input] of inputs.entries())
+      await f.store.planExecution({
+        ...f.owned,
+        executionId: calls[index]!.id,
+        sessionId: 's',
+        runId: f.run.id,
+        originCommandId: 'A',
+        stepId: 'step',
+        callId: calls[index]!.id,
+        kind: 'tool',
+        definitionId: 'files.edit',
+        definitionVersion: '2',
+        input,
+        decisionSource: source,
+      });
+    const card = await f.store.requestInteraction({
+      ...f.owned,
+      interactionId: 'batch-approval',
+      executionId: 'edit-0',
+      attempt: 1,
+      kind: 'approval',
+      definitionId: 'files.edit',
+      definitionVersion: '2',
+      inputDigest: grantDigest(inputs[0]!),
+      policyRevision: 'policy',
+      requiredRefs: [],
+      source,
+      request: {
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        ],
+      },
+    });
+    const answer = await f.store.answerInteraction({
+      ...f.scope,
+      commandId: 'deny-batch',
+      presentationSessionId: 's',
+      interactionId: card.id,
+      expectedRevision: card.revision,
+      answer: { kind: 'approval', decision: 'deny' },
+    });
+    expect(answer.status).toBe('applied');
+    await f.store.cancelCommand({
+      ...f.scope,
+      commandId: 'stop-A-after-denial',
+      targetCommandId: 'A',
+    });
+    const [history] = await f.store.readStoppedModelHistory({ ...f.scope, runId: f.run.id });
+    expect(history?.executionId).toBe('model');
+    const terminal = await f.store.finishRun({
+      ...f.owned,
+      runId: f.run.id,
+      status: 'cancelled',
+      requirements: [],
+      stoppedModelOutput: {
+        ...history!,
+        calls: calls.map(({ id, name }) => ({ id, name })),
+      },
+    });
+    expect(terminal.status).toBe('cancelled');
+    const edits = await Promise.all(calls.map(({ id }) => f.store.getExecution(id)));
+    expect(edits.map((row) => [row?.status, row?.authorization?.dispatched === true])).toEqual([
+      ['failed', false],
+      ['failed', false],
+    ]);
+    expect(edits[0]?.result).toMatchObject({ details: { code: 'approval_denied' } });
+    expect(edits[1]?.result).toMatchObject({
+      details: { code: 'approval_denied', kind: 'file_edit_batch@1', leaderExecutionId: 'edit-0' },
+    });
+  } finally {
+    await f.close();
   }
 });

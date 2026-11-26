@@ -1234,6 +1234,7 @@ test('a valid ask_user checker decision still requires actual human approval', a
           })
         ).interactions[0] ?? null,
     );
+    expect(interaction.request).toMatchObject({ approvalPresentation: 'reviewer_handoff' });
     expect(reviews).toBe(1);
     expect(f.effects()).toBe(0);
     const checker = (await f.store.listExecutions('s')).find(
@@ -1281,6 +1282,7 @@ test('an unconfigured checker retains the existing human fallback without dispat
           })
         ).interactions[0] ?? null,
     );
+    expect(interaction.request).not.toHaveProperty('approvalPresentation');
     expect(reviews).toBe(0);
     expect(f.effects()).toBe(0);
     expect(

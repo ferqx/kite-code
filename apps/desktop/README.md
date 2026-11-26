@@ -1471,9 +1471,11 @@ Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效�
 
 ## 原审批面板与授权观察
 
-[NativeApproval](src/native-approval.tsx)复用原 [Approval](../../packages/ui/src/desktop/Approval.tsx)按钮与范围菜单，只消费原冻结请求的 `options`。主按钮取 `kind:once` 的原展示，分体菜单列出全部 `kind:scope` 选项及其完整 label/details；每次只提交原 optionId，deny 不带选项。Shell、文件和 worktree 不各设答案格式，Main IPC 与持久 answer journal 同步拒绝旧 grant 字段及客户端自报 scope。已知 `shell.execute`、`shell.launch` 和 `shell.command` 的版本1显示准确原命令。工具标签与等宽目标分层，超宽单行省略。Shell 的 Tooltip 仅接收核实后的命令正文，正文未就绪时没有命令浮层。其他工具显示原身份和摘要，Tooltip 可查看核实后的原审批请求。`InteractionCard.renderApproval` 的紧凑模式自动沿原附件 reader 的身份、hash、UTF-8 和 EOF 资格核实完整正文，失败可重试；未读完、换卡、提交中或未知时禁用。回答仍走当前 Native／Main／公共 Client 原链，不建立第二个提交入口。
+[NativeApproval](src/native-approval.tsx)复用原 [Approval](../../packages/ui/src/desktop/Approval.tsx)按钮与范围菜单，只消费原冻结请求的 `options`。主按钮仅批准本次；对已核实的普通文件、Shell 和网页读取请求，按钮短文案表达实际动作。已识别的后续范围在分体菜单只显示一行，目标留在审批卡，完整授权信息仍可从原会话授权记录查看；未知范围沿原展示，不新增选项。每次只提交原 optionId，deny 不带选项。Shell、文件和 worktree 不各设答案格式，Main IPC 与持久 answer journal 同步拒绝旧 grant 字段及客户端自报 scope。已知 `shell.execute`、`shell.launch` 和 `shell.command` 的版本1显示准确原命令。工具标签与等宽目标分层，超宽单行省略。Shell 的 Tooltip 仅接收核实后的命令正文，正文未就绪时没有命令浮层。其他工具显示原身份和摘要，Tooltip 可查看核实后的原审批请求。`InteractionCard.renderApproval` 的紧凑模式自动沿原附件 reader 的身份、hash、UTF-8 和 EOF 资格核实完整正文，失败可重试；未读完、换卡、提交中或未知时禁用。回答仍走当前 Native／Main／公共 Client 原链，不建立第二个提交入口。
 
 [NativeApprovalGroup](src/native-approval-group.tsx)将当前普通工具审批归入输入组件上方的一张独立浮卡，高度不超过默认 Composer；右上角“‹ 1/3 ›”一次只挂载一项原 `InteractionCard` 与准确 `approval ID` article，翻页不回答其他项，主 Agent 默认先展示当前 Run 的待批项。runless Shell Job 需要以实际父 Tool 和原 Store／Session／根工作身份关联。当前运行有待批证据且首屏缺少对应卡时，Controller 先发布已核实的首屏，再在同一待批快照后台查找，并保留原分页游标。手动翻页、选择变化和读取范围失效会取消原查找。用户主动选择或正在操作的原卡保持，消失后重新选择。已核实的较早轮次标明归属。主 Agent 不显示名称；子 Agent 名称按实际 Store／Session／Run 核实，未匹配时显示“子 Agent”，不将内部 UUID 当名称。[ApprovalHeader](../../packages/ui/src/desktop/ApprovalHeader.tsx)按准确 Store／Session 的随机身份确定固定池中的图标及语义色槽，翻页、重开或新 Run 不重新随机。附件读取、独立 grant、在途／未知禁用、原答案身份与迟到隔离均沿原链；MCP 来源／凭据授权、问题及计划不进入普通审批组。
+
+普通审批点击后收起原卡并锁定该答复。只有已核对的原回执才能显示已提交；无回执时超时提供「核对原答复」，只读取原审批和现有回执，不重新提交。仅在确认请求没有提交时恢复原审批卡。 原提交和回执查询同时在途时，已经核实的接受或拒绝不会被另一侧的迟到错误改回未知。
 
 [审批呈现](src/native-approval-presentation.ts)在原合法按钮回调中同步锁定 Store／presentation Session／Interaction／revision，立即从浮卡移除本次卡片；`saved/submitting/accepted` 不再展示提交或等待执行文案。原 Controller 仍先登记稳定 command，再持久 prepare 后发唯一 POST；Renderer 不改写 Interaction、授权或工具状态，也不等待后续执行才关卡。原答案记录（含冷 journal）阻止旧 pending 观察重新显示可操作卡；journal 为恢复把在途记录投影为 unknown 时，只用同一准确 command 的 live saved/submitting 事实抑制这一恢复提示，journal 终态仍优先；只有 Main 的明确前置未提交错误且无原提交记录才恢复原卡。明确未提交、提交失败和真正无法确认结果的错误改由[审批 Toast](src/native-approval-feedback.tsx)复用原 `NativeToast`，不再插入会话异常状态行；正常在途及受理阶段不发 Toast。每个准确原答复的错误逐项显示，同作用域刷新不重复弹出，已有普通操作 Toast 优先，打开设置时暂缓审批提示，关闭后恢复；审批错误不重叠也不被丢弃。关闭或约六秒自动消失只退休本次提示，不删除 journal、不解除提交锁；后台仍沿原只读查回链处理，不生成新 command 或扩大批准范围。Toast 的“核对原答复”仅查同一 command，没有 command 时只刷新原读取；按钮忙碌期间不加进行中文字。查询本身失败仍用错误 Toast，既不称已批准也不提示成功。离开会话撤下旧提示并撤销旧按钮，返回原会话可再次核对仍未知的原答复；已关闭的已知失败不会因来回切换重复提示，新尝试或结果变化可产生新的错误。多卡只关闭决定项，重复原卡事件、鼠标双击及重复按键不批准后继；会话切换和旧 revision 迟到仅更新原键，错误 Toast 还须匹配当前 generation／Store／阅读选择，不能在新会话激活期间沿用旧会话提示或接受旧按钮。问题、计划和 MCP 来源／凭据的业务 Question 不复用此展示生命周期。
 
@@ -1490,6 +1492,10 @@ Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效�
 公共 Execution 的可选 `authorization` 是 [Store 只读观察](../../packages/agent/src/storage/README.md#只读授权观察)，只表达原 reviewer、人工答案、accepted decision 与派发事实。Native 将它映射到原 ToolActivity 的审批标签，分别显示“已提交批准，待核对”“已人工批准”、自动批准／拒绝／等待或结果未知；停止后保留可核对的已有记录。批准不覆盖工具的真实失败、取消或未知状态，也不授予执行权限。每项当前待批状态仍以实际 Interaction 为准；Auto 转人工时保留原审查原因。
 
 自动批准通过理由不进入工具展开正文，真实执行失败和结果未知只展示各自异常；原授权事实和盾牌提示仍保留，拒绝及转人工原因不受影响。显示规则、逐状态回归与实际浏览器过程证据归 [共享 UI](../../packages/ui/README.md#原桌面展示层)。Native 的已知写入展示同时支持保存的 `files.write@2` 和当前 `@3`，两者均显示“写入”；未来未识别版本仍使用原定义／版本文字，不推断能力或执行结果。
+
+普通网页搜索审批展示「网页搜索」、查询摘要和「允许搜索」；普通 MCP 工具使用「MCP 工具」和「允许调用」，仅在已有原调用对应的可信展示信息时显示服务与工具名称。没有可核实的名称时使用本地化泛称，不展示内部工具标识、策略错误码、原始 JSON 或认证配置。Git 工作树审批根据核实的原请求显示「创建 Git 工作树／允许创建」或「移除 Git 工作树／允许移除」，目标与动作分开显示；操作未核实或不是这两类时用「Git 工作树」泛称。审批范围和原选项不变。确认人工拒绝且工具没有派发时，工具行显示「人工审批已拒绝」，不以工具异常标记，也不展示内部拒绝码；实际执行失败或结果未知仍按原事实展示。
+
+普通审批浮卡的标题默认是「需要批准」。仅当桌面已核对原待批卡，且同一执行的成功自动审核明确请求人工决定时，标题改为「自动审核转人工」；不展示审核模型原文，不把审核超时或独立人工要求标为自动转人工。标题不影响答复权限。
 
 普通 root／child 工具审批都与父 Composer、权限选择器并存，待批时可切 Auto／Full 使原未派发工具重新判断。`nativeRootInteractionBlocksComposer` 为当前会话的 MCP 特殊审批核对原 Store、Session、Execution 与活动 Run，无 Run 的交互核对原执行。共享 SessionPage 的 `interactionHidesPrompt` 缺省保持。普通工具审批和补充问题与主编辑器并存。计划待审时，专用面板占用底部输入位置。实际输入、单轮准入及模式复核继续由原 Runtime 决定。
 

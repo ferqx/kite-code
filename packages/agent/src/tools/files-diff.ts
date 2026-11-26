@@ -302,3 +302,51 @@ export function fileChangePreview(
     truncated,
   };
 }
+
+/** Exact minimum line insertions/deletions, or no count if the work budget is exceeded. */
+export function exactFileLineCounts(old: string, next: string) {
+  if (old === next) return { added: 0, removed: 0 };
+  if (old.length + next.length > 4 * 1024 * 1024) return;
+  const lines = (value: string) => {
+    if (!value) return [];
+    // Keep each original terminator; the final newline is part of the line.
+    return value.split(/(?<=\n)/u);
+  };
+  const before = lines(old);
+  const after = lines(next);
+  let prefix = 0;
+  while (prefix < before.length && before[prefix] === after[prefix]) prefix++;
+  let n = before.length - prefix;
+  let m = after.length - prefix;
+  while (n > 0 && m > 0 && before[prefix + n - 1] === after[prefix + m - 1]) {
+    n--;
+    m--;
+  }
+  if (!n || !m) return { added: m, removed: n };
+  // Myers' furthest-reaching frontier. No partial number is emitted on timeout/budget.
+  const limit = 512;
+  if (Math.abs(n - m) > limit) return;
+  const frontier = new Int32Array(limit * 2 + 3).fill(-1);
+  const offset = limit + 1;
+  frontier[offset + 1] = 0;
+  let budget = 350000;
+  for (let d = 0; d <= limit; d++) {
+    for (let k = -d; k <= d; k += 2) {
+      if (--budget < 0) return;
+      const at = offset + k;
+      let x =
+        k === -d || (k !== d && frontier[at - 1]! < frontier[at + 1]!)
+          ? frontier[at + 1]!
+          : frontier[at - 1]! + 1;
+      let y = x - k;
+      while (x < n && y < m && before[prefix + x] === after[prefix + y]) {
+        if (--budget < 0) return;
+        x++;
+        y++;
+      }
+      frontier[at] = x;
+      if (x >= n && y >= m) return { added: (d + m - n) / 2, removed: (d + n - m) / 2 };
+    }
+  }
+  return undefined;
+}

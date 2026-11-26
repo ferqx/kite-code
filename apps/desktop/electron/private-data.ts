@@ -27,6 +27,7 @@ import {
   assertAnswerRecords,
   type NativeAnswerData,
   type NativeAnswerRecord,
+  advanceAnswerRecord,
   validateAnswerRecord,
 } from './answer-journal';
 import { callerCanonical, callerTextDigest, validateCallerRecord } from './caller-journal';
@@ -1404,12 +1405,12 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         return { created: true, value };
       });
     },
-    finishAnswer(commandId, phase) {
+    finishAnswer(commandId, phase, verifiedRejection) {
       return transaction(() => {
         const rows = answerRows(),
           old = rows.find((row) => row.intent.request.commandId === commandId);
         if (!old) throw Error('answer_intent_missing');
-        const value = validateAnswerRecord({ ...old, phase });
+        const value = advanceAnswerRecord(old, phase, verifiedRejection);
         if (
           rows.reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0) -
             Buffer.byteLength(JSON.stringify(old)) +

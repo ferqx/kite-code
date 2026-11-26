@@ -9,14 +9,14 @@ import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { createClient } from '@kite-ai/client';
+import { createClient, readApprovalOptions } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createPermissionManagement } from '../../src/permission-management';
 
 const fullBody = `complete-default-web-BEGIN\n${'actual public Tool body. '.repeat(5000)}\ncomplete-default-web-END`;
-async function fixture(off = false, automatic = false) {
+async function fixture(off = false, automatic = false, stockMode?: 'accept_edits' | 'full') {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-web-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -27,6 +27,7 @@ async function fixture(off = false, automatic = false) {
   const webRequests: string[] = [];
   const wireAudits: boolean[] = [];
   const admissions: { allowed: boolean; revision: string }[] = [];
+  let crossOriginRobots = false;
   let dns = 0,
     admitted = true;
   let credentialReads = 0;
@@ -39,11 +40,19 @@ async function fixture(off = false, automatic = false) {
     });
     wireAudits.push(audit.length >= webRequests.length);
     if (request.url === '/robots.txt') {
+      if (crossOriginRobots) {
+        response.writeHead(302, { location: 'https://outside-fixture.test/robots.txt' }).end();
+        return;
+      }
       response.end('User-agent: *');
       return;
     }
     if (request.url === '/redirect') {
       response.writeHead(302, { location: '/second' }).end();
+      return;
+    }
+    if (request.url === '/other-origin') {
+      response.writeHead(302, { location: 'https://outside-fixture.test/' }).end();
       return;
     }
     if (request.url === '/second') {
@@ -86,7 +95,7 @@ async function fixture(off = false, automatic = false) {
   const proxyEndpoint = proxy
     ? `http://127.0.0.1:${(proxy.address() as { port: number }).port}`
     : '';
-  let target = `${url}/redirect`;
+  let toolInput: { url: string } | { urls: string[] } = { url: `${url}/redirect` };
   let currentInput = 'work-1';
   const requests: {
     messages: { role: string; content: string }[];
@@ -116,7 +125,7 @@ async function fixture(off = false, automatic = false) {
                     index: 0,
                     id: `call-${requests.length}`,
                     type: 'function',
-                    function: { name: 'web_fetch', arguments: JSON.stringify({ url: target }) },
+                    function: { name: 'web_fetch', arguments: JSON.stringify(toolInput) },
                   },
                 ],
               },
@@ -181,12 +190,16 @@ async function fixture(off = false, automatic = false) {
           },
         }
       : {}),
-    permissions: {
-      authorize: async () => ({
-        allowed: true,
-        revision: 'explicit-current-tool-and-model-permission',
-      }),
-    },
+    ...(!stockMode
+      ? {
+          permissions: {
+            authorize: async () => ({
+              allowed: true,
+              revision: 'explicit-current-tool-and-model-permission',
+            }),
+          },
+        }
+      : {}),
   });
   let seedSinglePageParent = false;
   const runtime = createRuntime({
@@ -249,7 +262,7 @@ async function fixture(off = false, automatic = false) {
         ...scope,
         sessionId: 's',
         commandId: 'fixture-mode',
-        mode: 'full',
+        mode: stockMode ?? 'full',
         ifRevision: mode.revision,
         ifDefaultRevision: mode.defaultRevision,
         makeDefault: false,
@@ -272,7 +285,10 @@ async function fixture(off = false, automatic = false) {
   ).toBe('applied');
   const currentMode = await controls.readMode({ ...scope, sessionId: 's' });
   const currentTrust = await controls.readTrust({ ...scope, workspaceId: 'w' });
-  expect(currentMode).toMatchObject({ mode: 'full', scopeSessionId: 's' });
+  expect(currentMode).toMatchObject({
+    mode: stockMode ?? 'full',
+    scopeSessionId: 's',
+  });
   expect(currentMode.revision).not.toBe(mode.revision);
   expect(currentTrust.trusted).toBe(true);
   expect(currentTrust.revision).not.toBe(trust.revision);
@@ -300,11 +316,38 @@ async function fixture(off = false, automatic = false) {
     expectedStoreId,
     counts: () => ({ dns, network: webRequests.length, provider: requests.length }),
     credentialReads: () => credentialReads,
+    setCrossOriginRobots: (value: boolean) => {
+      crossOriginRobots = value;
+    },
     setAdmitted: (value: boolean) => {
       admitted = value;
     },
-    async run(path = '/redirect') {
-      target = url + path;
+    async pending() {
+      const expires = Date.now() + 4000;
+      do {
+        const { interactions } = await client.listInteractions('s', {
+          storeId: expectedStoreId,
+          state: 'pending',
+        });
+        if (interactions[0]) return interactions[0];
+        await Bun.sleep(10);
+      } while (Date.now() < expires);
+      throw new Error('Expected a Web Fetch approval');
+    },
+    async approve(
+      card: Awaited<ReturnType<typeof client.listInteractions>>['interactions'][number],
+      optionId: string,
+    ) {
+      return client.answerInteraction('s', card.id, {
+        expectedStoreId,
+        commandId: `answer-${card.id}`,
+        expectedRevision: card.revision,
+        answer: { kind: 'approval', decision: 'approve', optionId },
+      });
+    },
+    async run(path: string | string[] = '/redirect') {
+      const absolute = (value: string) => (value.startsWith('/') ? url + value : value);
+      toolInput = Array.isArray(path) ? { urls: path.map(absolute) } : { url: absolute(path) };
       const commandId = `work-${++id}`;
       currentInput = id === 1 ? commandId : `New task: ${commandId}`;
       await client.startRun('s', {
@@ -717,3 +760,82 @@ test('default Service needs no proxy configuration, freezes the discovered exit 
     await f.close();
   }
 }, 25000);
+
+test('exact Web Fetch origin scope is used by real dispatch and never expands to a redirect or mixed initial origins', async () => {
+  const f = await fixture(false, false, 'accept_edits');
+  try {
+    const original = f.run('/redirect');
+    const card = await f.pending();
+    const grant = readApprovalOptions(card.request).find((option) => option.kind === 'scope');
+    expect(grant?.presentation.label).toBe('本会话内读取同一来源');
+    expect(f.counts()).toMatchObject({ dns: 0, network: 0 });
+    await f.approve(card, grant!.optionId);
+    expect((await original).execution).toMatchObject({ status: 'succeeded' });
+    expect((await f.run(['/complete', '/second'])).execution?.status).toBe('succeeded');
+
+    const before = f.counts();
+    const admissions = f.admissions.length;
+    const redirected = await f.run('/other-origin');
+    expect(redirected.execution?.result).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'web_grant_origin_changed', resource: 'page' },
+    });
+    expect(f.counts()).toMatchObject({ dns: before.dns + 1, network: before.network + 1 });
+    expect(f.admissions).toHaveLength(admissions + 1);
+
+    const mixed = f.run(['/complete', 'https://outside-fixture.test/']);
+    const mixedCard = await f.pending();
+    expect(readApprovalOptions(mixedCard.request).map((option) => option.kind)).toEqual(['once']);
+    expect(f.counts()).toMatchObject({ dns: before.dns + 1, network: before.network + 1 });
+    // An ordinary one-time decision keeps existing network policy; the fake second host is rejected there.
+    await f.approve(mixedCard, 'once');
+    await mixed;
+  } finally {
+    await f.close();
+  }
+}, 20000);
+
+test('origin scope stops at a robots redirect without touching the target or caching an empty ruleset', async () => {
+  const f = await fixture(false, false, 'accept_edits');
+  try {
+    // Warm the ordinary mode's robots cache, then prove the scoped path reads its own rules.
+    const warm = f.run('/complete');
+    const once = await f.pending();
+    await f.approve(once, 'once');
+    expect((await warm).execution?.status).toBe('succeeded');
+    f.setCrossOriginRobots(true);
+    const start = f.run('/complete');
+    const card = await f.pending();
+    const scope = readApprovalOptions(card.request).find((option) => option.kind === 'scope');
+    await f.approve(card, scope!.optionId);
+    expect((await start).execution?.result).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'web_grant_origin_changed', resource: 'robots' },
+    });
+    expect(f.webRequests.slice(2).map((request) => request.split('/')[1])).toEqual(['robots.txt']);
+    expect(f.admissions).toHaveLength(3);
+    expect(f.counts().dns).toBe(2);
+    f.setCrossOriginRobots(false);
+    expect((await f.run('/complete')).execution?.status).toBe('succeeded');
+    expect(f.webRequests.slice(2).map((request) => request.split('/')[1])).toEqual([
+      'robots.txt',
+      'robots.txt',
+      'complete',
+    ]);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+test('stock Full Web Fetch still dispatches normally with explicit no-grant proof', async () => {
+  const f = await fixture(false, false, 'full');
+  try {
+    expect((await f.run('/redirect')).execution?.status).toBe('succeeded');
+    expect(f.webRequests).toHaveLength(4);
+    expect(
+      (await f.client.listInteractions('s', { storeId: f.expectedStoreId })).interactions,
+    ).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});

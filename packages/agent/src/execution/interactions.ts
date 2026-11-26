@@ -10,7 +10,8 @@ import type {
   PermissionDecision,
   Permissions,
 } from '../extensions';
-import { semanticDigest } from '../json';
+import { type FileEditBatchPlan, fileEditBatchApproval } from '../file-edit-batch-plan';
+import { canonicalJson, semanticDigest } from '../json';
 import {
   type ApprovalOption,
   approvalOptions,
@@ -38,6 +39,7 @@ import { AuthorizationCheckUnavailableError } from './authorization-check-feedba
 import {
   type AuthorizationChangeWait,
   AuthorizationRefreshRequired,
+  FileEditBatchRequiresIndependentReview,
   modeControlsChanged,
 } from './authorization-refresh';
 
@@ -121,6 +123,7 @@ export class QuestionCancelledError extends AgentError {
 
 export interface InteractionScope {
   final?: boolean;
+  fileEditBatch?: FileEditBatchPlan;
   resourcesHeldByAncestor?: boolean;
   executionConfirmation?: PreparedExecutionConfirmation | null;
   prepareExecutionConfirmation?: (
@@ -243,6 +246,27 @@ export class InteractionGate {
       controlReads: decision.controlReads,
     });
     throw new AuthorizationRefreshRequired();
+  }
+
+  /** Revoke only the exact pending batch approval before independent authorization.
+   * A denial that won the race stays a denial. */
+  async retireFileEditBatchApproval(
+    scope: InteractionScope,
+    execution: ExecutionRecord,
+    current: PermissionDecision,
+  ) {
+    if (!execution.interactionBinding) return;
+    const interaction = await this.store.getInteraction({
+      expectedStoreId: scope.expectedStoreId,
+      sessionId: execution.sessionId,
+      interactionId: execution.interactionBinding.interactionId,
+    });
+    if (!interaction) throw new AgentError('interaction_not_found');
+    try {
+      await this.refresh(scope, interaction, current);
+    } catch (cause) {
+      if (!(cause instanceof AuthorizationRefreshRequired)) throw cause;
+    }
   }
 
   private async invalidateCheck(
@@ -516,6 +540,7 @@ export class InteractionGate {
     scope.signal.throwIfAborted();
     const execution = await this.store.getExecution(scope.executionId);
     if (!execution) throw new AgentError('execution_not_found');
+    if (scope.fileEditBatch && decision.check) throw new FileEditBatchRequiresIndependentReview();
     const confirmation =
       scope.executionConfirmation ??
       (decision.allowed || decision.approval || decision.check
@@ -598,6 +623,7 @@ export class InteractionGate {
     let reference = scope.previousCheck;
     let policyEvidence: AutoAuthorizationEvidence | undefined;
     let checkedGrant: string | undefined;
+    let reviewerHandoff = false;
     let materialReviewed = false;
     if (
       reference &&
@@ -781,6 +807,7 @@ export class InteractionGate {
             ...(decision.controlReads === undefined ? {} : { controlReads: decision.controlReads }),
             ...(decision.snapshot === undefined ? {} : { snapshot: decision.snapshot }),
           } satisfies AcceptedAuthorization;
+        reviewerHandoff = checked.decision === 'ask_user' && !decision.check?.requireApproval;
         if (checked.decision === 'approve_once') checkedGrant = checked.checkExecutionId;
         if (checked.decision === 'reject') throw publicDenial(checked.reason, true);
         if (scope.final && !checkedGrant && !execution.interactionBinding)
@@ -826,13 +853,31 @@ export class InteractionGate {
     if (scope.final && !execution.interactionBinding)
       throw new AgentError('authorization_refresh_required');
     const inputDigest = await semanticDigest(request.input);
+    const batch = scope.fileEditBatch;
+    if (
+      batch &&
+      (request.kind !== 'tool' ||
+        request.definitionId !== 'files.edit' ||
+        request.definitionVersion !== '2' ||
+        batch.members[0]?.id !== execution.callId ||
+        canonicalJson(batch.members[0].input) !== canonicalJson(request.input) ||
+        !source ||
+        typeof source !== 'object' ||
+        Array.isArray(source) ||
+        source.modelExecutionId !== batch.modelExecutionId)
+    )
+      throw new AgentError('interaction_binding_changed');
+    const batchRequest = batch ? fileEditBatchApproval(batch) : undefined;
     const approvalRequest = (): Json => ({
       policy: decision.approval!.request,
-      options: presentedApprovalOptions(
-        request,
-        decision.approval!.request,
-        decision.approval!.options ?? approvalOptions(decision.grantOffers),
-      ) as unknown as Json,
+      options: (batchRequest
+        ? [{ optionId: 'once', kind: 'once', presentation: { label: '允许编辑', details: [] } }]
+        : presentedApprovalOptions(
+            request,
+            decision.approval!.request,
+            decision.approval!.options ?? approvalOptions(decision.grantOffers),
+          )) as unknown as Json,
+      ...(batchRequest ? { fileEditBatch: batchRequest } : {}),
       definitionId: request.definitionId,
       definitionVersion: request.definitionVersion,
       input: request.input,
@@ -860,6 +905,8 @@ export class InteractionGate {
             ...((scope.sealApprovalRequest
               ? await scope.sealApprovalRequest(approvalRequest())
               : approvalRequest()) as Record<string, Json>),
+            // Read-only copy hint bound to the original durable reviewer decision.
+            ...(reviewerHandoff ? { approvalPresentation: 'reviewer_handoff' } : {}),
             ...(decision.controlReads
               ? { approvalControlReads: decision.controlReads as unknown as Json }
               : {}),
@@ -930,16 +977,32 @@ export class InteractionGate {
       )
         throw new AgentError('interaction_binding_changed');
     }
-    await scope.verifyApprovalRequest?.(
-      interaction.request,
-      decision.approval
-        ? approvalRequest()
-        : {
-            definitionId: request.definitionId,
-            definitionVersion: request.definitionVersion,
-            input: request.input,
-          },
-    );
+    const actualRequest: Json = decision.approval
+      ? approvalRequest()
+      : {
+          definitionId: request.definitionId,
+          definitionVersion: request.definitionVersion,
+          input: request.input,
+          ...(batchRequest ? { fileEditBatch: batchRequest } : {}),
+        };
+    const savedRequest = interaction.request;
+    if (
+      savedRequest &&
+      typeof savedRequest === 'object' &&
+      !Array.isArray(savedRequest) &&
+      !Object.hasOwn(savedRequest, 'approvalRequestDigest') &&
+      canonicalJson(savedRequest.fileEditBatch ?? null) !== canonicalJson(batchRequest ?? null)
+    )
+      throw new AgentError('interaction_binding_changed');
+    if (
+      batchRequest &&
+      !scope.verifyApprovalRequest &&
+      savedRequest &&
+      typeof savedRequest === 'object' &&
+      Object.hasOwn(savedRequest, 'approvalRequestDigest')
+    )
+      throw new AgentError('interaction_binding_changed');
+    await scope.verifyApprovalRequest?.(savedRequest, actualRequest);
     const accepted = await this.accept(scope, interaction);
     if (accepted.answer?.kind !== 'approval' || accepted.answer.decision !== 'approve')
       throw new AgentError('permission_denied');

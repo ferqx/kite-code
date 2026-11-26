@@ -506,12 +506,23 @@ export function createDefaultPermissionConfiguration(options: {
           prepareRiskReview: async (request) =>
             ((await input.shellForRequest?.(request)) ?? shell).prepareRiskReview(request),
         }),
-        ...files.toolBehaviors.filter(
-          (behavior) =>
-            behavior.capability.kind === 'tool' &&
-            (behavior.capability.definitionId === 'files.read' ||
-              (toolIds.includes('files.write') && toolIds.includes('files.edit'))),
-        ),
+        ...runExtensions
+          .filter((extension) => extension.id === web.extension.id)
+          .flatMap(web.toolBehaviorsFor),
+        ...files.toolBehaviors.flatMap((behavior) => {
+          if (behavior.capability.kind !== 'tool') return [];
+          if (
+            behavior.capability.definitionId === 'files.read' ||
+            (toolIds.includes('files.write') && toolIds.includes('files.edit'))
+          )
+            return [behavior];
+          if (behavior.capability.definitionId === 'files.edit' && behavior.fileEditBatchTarget) {
+            // Batch preparation is independent of the optional edit+write reusable scope.
+            const { grantOffers: _scopeNotSelected, ...batchOnly } = behavior;
+            return [batchOnly];
+          }
+          return [];
+        }),
       ].filter(
         (behavior) =>
           behavior.capability.kind !== 'tool' || toolIds.includes(behavior.capability.definitionId),
@@ -603,7 +614,7 @@ export function createDefaultPermissionConfiguration(options: {
         !description.requiresApproval &&
         !description.safeRead &&
         !(behavior.autoReview === 'none' && policy?.mode === 'auto')
-          ? await behavior.grantOffers(request)
+          ? await behavior.grantOffers(request, policy.mode)
           : undefined;
       return {
         ...description,
@@ -886,7 +897,31 @@ export function createDefaultPermissionConfiguration(options: {
           selectedSources.admissionError(request, admissionInput) ??
           selectedMcp.admissionError(request, admissionInput);
         if (error) return { allowed: false, revision: 'mcp-selected-server-1', reason: error };
-        return await planningPermissions.authorize(request);
+        const names = selectedMcp.approvalNames(request);
+        // Prefix form can identify what to reject, not what to classify or permit.
+        // A remote-shaped Tool must still have the original scoped registry fact.
+        if (
+          request.kind === 'tool' &&
+          /^mcp\.[A-Za-z0-9_-]{1,128}\.[a-f0-9]{32}$/.test(request.definitionId) &&
+          !names
+        )
+          return {
+            allowed: false,
+            revision: 'mcp-registered-tool-1',
+            reason: 'tool_not_available',
+          };
+        const decision = await planningPermissions.authorize(request);
+        if (!names || !decision.approval) return decision;
+        const policyRequest = decision.approval.request;
+        if (!policyRequest || typeof policyRequest !== 'object' || Array.isArray(policyRequest))
+          return decision;
+        return {
+          ...decision,
+          approval: {
+            ...decision.approval,
+            request: { ...policyRequest, mcpApprovalNames: names },
+          },
+        };
       },
     };
     return {

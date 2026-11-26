@@ -86,7 +86,7 @@ function deferred() {
   });
   return { promise, resolve, reject };
 }
-async function fixture(initial: NativeState) {
+async function fixture(initial: NativeState, receiptWaitMs?: number) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -110,7 +110,7 @@ async function fixture(initial: NativeState) {
   const requests: { card: Interaction; answer: unknown; flight: ReturnType<typeof deferred> }[] =
     [];
   function View() {
-    presentation = useNativeApprovalPresentation(state);
+    presentation = useNativeApprovalPresentation(state, receiptWaitMs);
     return (
       <>
         <textarea defaultValue="keep this draft" />
@@ -206,6 +206,50 @@ for (const decision of ['仅此次', '拒绝'])
       await f.close();
     }
   });
+
+test('a missing native receipt exposes recovery without publishing or resubmitting the answer', async () => {
+  const original = card();
+  const state = stateFor([original]);
+  const f = await fixture(state, 15);
+  try {
+    await act(async () => f.button('仅此次').click());
+    expect(f.presentation().received(original)).toBe(false);
+    expect(f.host.querySelector('.native-approval-group')).toBeNull();
+    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 45)));
+    expect(f.host.textContent).toContain('unknown:no-command:false');
+    expect(f.presentation().received(original)).toBe(false);
+    await f.render(state); // A refresh returning the original pending card is not rejection proof.
+    expect(f.host.querySelector('.native-approval-group')).toBeNull();
+    await f.presentation().submit(original, async () => {
+      throw new Error('must never issue another action');
+    });
+    expect(f.requests).toHaveLength(1);
+    expect(f.host.textContent).toContain('unknown:no-command:false');
+    await act(async () => f.requests[0]!.flight.resolve());
+    expect(f.presentation().received(original)).toBe(false); // Promise resolution is not authority.
+    await f.render({
+      ...state,
+      interactionSubmissions: [
+        {
+          interaction: original,
+          intent: {
+            expectedStoreId: 'store',
+            commandId: 'original-answer',
+            expectedRevision: '1',
+            answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+          },
+          phase: 'accepted',
+        },
+      ],
+    });
+    expect(f.presentation().received(original)).toBe(true);
+    expect(f.host.querySelector('[role="status"]')).toBeNull();
+    expect(f.host.querySelector('.native-approval-group')).toBeNull();
+    expect(f.requests).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
 
 test('an unconfirmed answer stays hidden, survives session changes, and only the original journal reconciles it', async () => {
   const original = card(),

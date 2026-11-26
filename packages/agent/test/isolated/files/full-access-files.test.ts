@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AuthorizationRequest, ToolContext } from '../../../src/extensions';
 import {
+  createFileToolBehaviors,
   createFileTools,
   createWorkspaceFiles,
   withExternalFileReads,
@@ -298,8 +299,8 @@ test('protected roots and symlink mutation never fall back to an unprotected wri
 test('ordinary hardlink reads retain compatibility without issuing a writable baseline', async () => {
   const f = fixture();
   try {
-    const path = join(f.external, 'original'),
-      link = join(f.external, 'alias');
+    const path = join(f.external, 'original.txt'),
+      link = join(f.external, 'alias.txt');
     writeFileSync(path, 'linked');
     linkSync(path, link);
     const read = JSON.parse((await f.execute('files.read', { path: link })).content);
@@ -316,7 +317,7 @@ test('ordinary hardlink reads retain compatibility without issuing a writable ba
 test('stale baseline and a changed prepared parent are rejected before publication', async () => {
   const f = fixture();
   try {
-    const path = join(f.external, 'existing');
+    const path = join(f.external, 'existing.txt');
     writeFileSync(path, 'before');
     const baseline = JSON.parse((await f.execute('files.read', { path })).content).baseline;
     writeFileSync(path, 'changed externally');
@@ -519,6 +520,67 @@ test.skipIf(process.platform === 'win32')(
     expect(cleanupMatched).toBe(true);
   },
 );
+
+test('external file grant offers match only the verified file slot, without executing it', async () => {
+  const f = fixture();
+  try {
+    const behaviors = createFileToolBehaviors({
+      tools: f.api.tools,
+      async readFiles(request) {
+        const selected = await f.api.openExternalGrantLocation(request);
+        if (!selected) throw Error('file_scope_unavailable');
+        return { workspaceId: 'workspace', ...selected };
+      },
+    });
+    async function offers(toolId: 'files.write' | 'files.edit', path: string) {
+      const request = f.request(toolId, { path });
+      return behaviors.find(({ definition }) => definition.id === toolId)!.grantOffers!(request);
+    }
+    const path = join(f.external, 'same.txt');
+    const [write] = await offers('files.write', path);
+    const [edit] = await offers('files.edit', path);
+    expect(write?.presentation.label).toBe('允许后续编辑');
+    expect(write?.presentation.details).toContain(`File: ${path}`);
+    expect(edit?.presentation).toEqual(write?.presentation);
+    expect(write?.bindings.map(({ definitionId }) => definitionId).sort()).toEqual([
+      'files.edit',
+      'files.write',
+    ]);
+    expect(edit?.scopeDigest).toBe(write?.scopeDigest);
+    expect((await offers('files.write', join(f.external, 'other.txt')))[0]?.scopeDigest).not.toBe(
+      write?.scopeDigest,
+    );
+    expect(await offers('files.write', join(f.external, 'missing-parent', 'file.txt'))).toEqual([]);
+    expect(await offers('files.write', join(f.protectedRoot, 'protected.txt'))).toEqual([]);
+    const request = f.request('files.write', { path });
+    const permissions = createPermissionPolicy({
+      readPolicy: () => ({
+        mode: 'accept_edits',
+        workspaceTrust: true,
+        revision: 'policy',
+        allowed: write!.bindings,
+      }),
+      async describeCapability() {
+        const description = await f.api.describeRequest(request);
+        return description && { ...description, grantOffers: [write!] };
+      },
+    });
+    const decision = await permissions.authorize(request);
+    expect(decision.allowed).toBe(false);
+    expect(decision.approval?.options?.map(({ presentation }) => presentation.label)).toEqual([
+      '仅此次',
+      '允许后续编辑',
+    ]);
+    expect(existsSync(path)).toBe(false);
+    renameSync(f.external, join(f.root, 'previous-parent'));
+    mkdirSync(f.external);
+    const [replacement] = await offers('files.write', path);
+    expect(replacement?.scopeDigest).toBeString();
+    expect(replacement?.scopeDigest).not.toBe(write?.scopeDigest);
+  } finally {
+    await f.close();
+  }
+});
 
 for (const mode of ['accept_edits', 'auto', 'full'] as const) {
   for (const toolId of ['files.read', 'files.write', 'files.edit']) {

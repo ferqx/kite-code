@@ -40,6 +40,7 @@ export interface ToolBehaviorContext {
 /** Existing owner-specific Store proof bridge; callbacks run only in trusted host code. */
 export interface ParentAuthorizationBridge {
   worktree(): Promise<import('./storage/port').AutoAuthorizationEvidence | null>;
+  shell(proof: Json): Promise<import('./storage/port').AutoAuthorizationEvidence | null>;
 }
 /** Core owns this private preparation until dispatch or disposal. It is never serialized. */
 export interface PreparedToolExecution {
@@ -49,6 +50,11 @@ export interface PreparedToolExecution {
 /** Functions are host code, never reconstructed from configuration JSON or extension records. */
 export interface TrustedToolBehavior extends ToolBehaviorBinding {
   readonly definition: ToolDefinition | JobDefinition | ActionDefinition;
+  fileEditBatchTarget?(
+    request: AuthorizationRequest,
+    context: import('./extensions').ActionContext,
+    batch?: readonly import('./file-edit-batch-plan').FileEditBatchInput[],
+  ): Promise<import('./file-edit-batch-plan').ResolvedEditTarget | null>;
   executionConfirmation?(
     request: AuthorizationRequest,
   ): Promise<import('./execution-confirmation').ExecutionConfirmationDeclaration | null>;
@@ -81,7 +87,10 @@ export interface TrustedToolBehavior extends ToolBehaviorBinding {
     context: ToolBehaviorContext,
     bridge: ParentAuthorizationBridge,
   ): Promise<import('./storage/port').AutoAuthorizationEvidence | null>;
-  grantOffers?(request: AuthorizationRequest): Promise<readonly GrantCandidate[]>;
+  grantOffers?(
+    request: AuthorizationRequest,
+    mode?: import('./permissions').PermissionMode,
+  ): Promise<readonly GrantCandidate[]>;
 }
 const key = (value: CapabilityBinding) =>
   JSON.stringify([value.kind, value.definitionId, value.definitionVersion]);
@@ -132,6 +141,11 @@ export function createToolBehaviorRegistry(input: {
       !behavior.contractRef ||
       behavior.contractRef.length > 512 ||
       !/^[a-f0-9]{64}$/.test(behavior.configurationDigest) ||
+      (behavior.fileEditBatchTarget !== undefined &&
+        (behavior.capability.kind !== 'tool' ||
+          behavior.capability.definitionId !== 'files.edit' ||
+          behavior.capability.definitionVersion !== '2' ||
+          typeof behavior.fileEditBatchTarget !== 'function')) ||
       (behavior.prepareTool !== undefined &&
         (behavior.capability.kind !== 'tool' || typeof behavior.prepareTool !== 'function')) ||
       (behavior.workspaceRead !== undefined &&

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ArtifactRef, ToolContext, ToolResult } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles, type WorkspaceFiles } from '../../../src/files';
+import { readModelExecutionId } from '../../../src/model-identifier';
 import { formatFileReadResult } from '../../../src/tools/files/model-result';
 
 const owners: WorkspaceFiles[] = [];
@@ -53,6 +54,8 @@ test('read presentation preserves exact body and the complete baseline remains u
   expect(tool.model?.resultVersion).toBe('1');
   const text = tool.formatModelResult!({ result })!;
   expect(text).toContain('complete file');
+  const executionReference = JSON.parse(text.match(/^execution_id: (.+)$/m)![1]!);
+  expect(readModelExecutionId(executionReference)).toBe(f.context.executionId);
   expect(text).not.toContain('"observation"');
   expect(presentedBody(text)).toBe(content);
   const baseRef = JSON.parse(
@@ -87,6 +90,21 @@ test('read presentation preserves exact body and the complete baseline remains u
       },
     }),
   ).toBeUndefined();
+});
+
+test('read presentation omits missing or invalid execution identity without changing the body', async () => {
+  const f = fixture();
+  f.put('a.txt', 'original\n');
+  const read = await f.execute('files.read', { path: 'a.txt' });
+  for (const executionId of [undefined, null, 42, '', 'invalid\0id', 'a'.repeat(257), '\uD800']) {
+    const result = {
+      ...read,
+      content: JSON.stringify({ ...JSON.parse(read.content), executionId }),
+    };
+    const presented = formatFileReadResult({ result })!;
+    expect(presented).not.toMatch(/^execution_id:/m);
+    expect(presentedBody(presented)).toBe('original\n');
+  }
 });
 
 test('external read presentation preserves an available native baseline without granting write authority', async () => {
@@ -131,22 +149,24 @@ test('external read presentation preserves an available native baseline without 
 
 test('read presentation distinguishes a suffix/window, an empty file and an empty EOF selection', async () => {
   const f = fixture();
-  f.put('a', 'one\ntwo\nthree\n');
-  f.put('empty', '');
+  f.put('a.txt', 'one\ntwo\nthree\n');
+  f.put('empty.txt', '');
   const middle = formatFileReadResult({
-    result: await f.execute('files.read', { path: 'a', offset: 2, limit: 1 }),
+    result: await f.execute('files.read', { path: 'a.txt', offset: 2, limit: 1 }),
   })!;
   expect(middle).toContain('lines=2-2/3; next_line=3; selected window only');
   expect(presentedBody(middle)).toBe('two\n');
   const suffix = formatFileReadResult({
-    result: await f.execute('files.read', { path: 'a', offset: 2 }),
+    result: await f.execute('files.read', { path: 'a.txt', offset: 2 }),
   })!;
   expect(suffix).toContain('lines=2-3/3; next_line=null; selected window only');
   expect(presentedBody(suffix)).toBe('two\nthree\n');
-  const empty = formatFileReadResult({ result: await f.execute('files.read', { path: 'empty' }) })!;
+  const empty = formatFileReadResult({
+    result: await f.execute('files.read', { path: 'empty.txt' }),
+  })!;
   expect(empty).toContain('from_line=1; lines=none/0; next_line=null; complete file');
   const eof = formatFileReadResult({
-    result: await f.execute('files.read', { path: 'a', offset: 999 }),
+    result: await f.execute('files.read', { path: 'a.txt', offset: 999 }),
   })!;
   expect(eof).toContain('from_line=999; lines=none/3; next_line=null; selected window only');
   expect(presentedBody(eof)).toBe('');
@@ -155,7 +175,7 @@ test('read presentation distinguishes a suffix/window, an empty file and an empt
 test('read Artifact presentation requires the verified full body and never substitutes its bounded excerpt', async () => {
   const f = fixture();
   const content = `\uFEFF${'雪😀\\"\r\n'.repeat(100000)}TAIL_EXACT\n`;
-  f.put('large', content);
+  f.put('large.txt', content);
   let artifactBody = '';
   const reference: ArtifactRef = {
     id: 'body',
@@ -174,7 +194,7 @@ test('read Artifact presentation requires the verified full body and never subst
   } as ToolContext;
   const result = await f.execute(
     'files.read',
-    { path: 'large', limit: Number.MAX_SAFE_INTEGER },
+    { path: 'large.txt', limit: Number.MAX_SAFE_INTEGER },
     context,
   );
   expect(result.outcome).toBe('succeeded');
@@ -199,8 +219,8 @@ test('read Artifact presentation requires the verified full body and never subst
 
 test('material result details and malformed or unknown read fields preserve the original receipt', async () => {
   const f = fixture();
-  f.put('a', 'needle\n');
-  const read = await f.execute('files.read', { path: 'a' });
+  f.put('a.txt', 'needle\n');
+  const read = await f.execute('files.read', { path: 'a.txt' });
   expect(
     formatFileReadResult({ result: { ...read, details: { warning: 'material' } } }),
   ).toBeUndefined();
@@ -219,7 +239,7 @@ test('material result details and malformed or unknown read fields preserve the 
       ...JSON.parse(read.content),
       observation: { ...JSON.parse(read.content).observation, newFact: true },
     }),
-    JSON.stringify({ path: 'a', content: 'needle\n' }),
+    JSON.stringify({ path: 'a.txt', content: 'needle\n' }),
     JSON.stringify({ ...JSON.parse(read.content), newMeaningfulField: 'unknown' }),
   ])
     expect(formatFileReadResult({ result: { ...read, content } })).toBeUndefined();
@@ -227,8 +247,8 @@ test('material result details and malformed or unknown read fields preserve the 
 
 test('file presentation keeps original read receipt identity without exposing bookkeeping IDs to the model', async () => {
   const f = fixture();
-  f.put('a', 'needle\n');
-  const result = await f.execute('files.read', { path: 'a' });
+  f.put('a.txt', 'needle\n');
+  const result = await f.execute('files.read', { path: 'a.txt' });
   const raw = JSON.parse(result.content);
   expect(raw.executionId).toBe('actual-execution');
   expect(raw.runId).toBe('actual-run');

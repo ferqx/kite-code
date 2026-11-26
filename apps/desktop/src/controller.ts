@@ -125,6 +125,10 @@ export function verifyInteractionAnswerReceipt(
   return 'accepted';
 }
 
+function verifiedAnswerReceipt(entry: InteractionAnswerSubmission): Command | undefined {
+  return entry.phase === 'accepted' || entry.phase === 'failed' ? entry.receipt : undefined;
+}
+
 export interface InteractionAnswerSubmission {
   readonly interaction: Interaction;
   readonly intent: AnswerInteractionRequest;
@@ -950,16 +954,18 @@ export class DesktopController {
           frozen.id,
           intent,
         );
+        const known = verifiedAnswerReceipt(entry.state);
+        if (known) return known;
         const phase = verifyInteractionAnswerReceipt(frozen, intent, receipt);
-        entry.state = {
-          ...entry.state,
-          phase,
-          receipt,
-        };
-        this.options.interactionAnswerJournal?.finish(entry.state);
+        const confirmed = { ...entry.state, phase, receipt };
+        // The private journal also verifies subject and request digest before publishing.
+        this.options.interactionAnswerJournal?.finish(confirmed);
+        entry.state = confirmed;
         this.publishAnswer(entry.state);
         return receipt;
       } catch (error) {
+        const known = verifiedAnswerReceipt(entry.state);
+        if (known) return known;
         entry.state = {
           ...entry.state,
           phase:
@@ -993,6 +999,8 @@ export class DesktopController {
       const receipt = this.options.interactionAnswerJournal
         ? await this.options.interactionAnswerJournal.lookup(entry.state)
         : await this.client.getCommand(entry.state.intent.commandId);
+      const known = verifiedAnswerReceipt(entry.state);
+      if (known) return known;
       const phase = verifyInteractionAnswerReceipt(
         entry.state.interaction,
         entry.state.intent,
@@ -1007,6 +1015,7 @@ export class DesktopController {
       this.publishAnswer(entry.state);
       return receipt;
     } catch (error) {
+      if (verifiedAnswerReceipt(entry.state)) throw error;
       entry.state = {
         ...entry.state,
         phase: 'unknown',

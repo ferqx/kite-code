@@ -1,3 +1,4 @@
+import { createPermissionManagement } from './permission-management';
 import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -19,6 +20,7 @@ import {
   type CheckpointSource,
   createFileCheckpointing,
   createFileToolBehaviors,
+  fileEditBatchTarget,
   createImageFileReads,
   createReinspectImagesTool,
   createScopedFileCheckpointing,
@@ -1013,11 +1015,54 @@ export function createDefaultFileCheckpointConfiguration(options: {
       } satisfies TrustedToolBehavior,
       ...createFileToolBehaviors({
         tools,
+        async fileEditBatchTarget(request, context, batch) {
+          const runtime = options.runtime();
+          const model = await runtime.getExecution(request.executionId);
+          const command = model && (await runtime.getCommand(model.originCommandId));
+          if (!model || !command || model.kind !== 'model' || model.sessionId !== request.sessionId)
+            return null;
+          const mode = await createPermissionManagement({
+            runtime,
+            profile: options.profile,
+            writable: false,
+          }).readMode({
+            expectedStoreId: model.originStoreId,
+            sessionId: request.sessionId,
+            subjectId: command.subjectId,
+          });
+          if (
+            mode.mode === 'auto' ||
+            (await planFiles.describeRequest(request)) ||
+            request.signal.aborted
+          )
+            return null;
+          const external = await fullAccessFiles.fileEditBatchTarget(request, context, batch);
+          if (external !== undefined) return external;
+          const { root } = await resolveSessionExecutionRoot(options.runtime(), request);
+          const files = createWorkspaceFiles({
+            root,
+            protectReads: true,
+            protectedPaths: await protectedPaths(root, options.profile, options.runtimeAssets()),
+          });
+          try {
+            return await fileEditBatchTarget(request.input, context, files, root, batch);
+          } finally {
+            await files.close();
+          }
+        },
         async readFiles(request) {
           const runtime = options.runtime();
           const session = await runtime.getSession(request.sessionId);
           const workspace = session && (await runtime.getWorkspace(session.workspaceId));
           if (!session || session.deletedAt !== null || !workspace) fail('file_scope_unavailable');
+          if (
+            (await images.describeRequest(request)) ||
+            (await planFiles.describeRequest(request)) ||
+            (await inputFiles.describeRequest(request))
+          )
+            fail('file_scope_unavailable');
+          const external = await fullAccessFiles.openExternalGrantLocation(request);
+          if (external) return { workspaceId: workspace.id, ...external };
           const { root } = await resolveSessionExecutionRoot(runtime, request);
           return {
             workspaceId: workspace.id,

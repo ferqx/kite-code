@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type Json, type RecoveryReport, type SessionReconciliation } from '../types';
+import { uncertainFileEditBatches } from './file-edit-batch-recovery';
 import type { SqliteOperations } from './operations';
 
 type Input = Parameters<Store['reconcileSession']>[0];
@@ -349,11 +350,13 @@ export function reconcileSession(db: SqliteOperations, input: Input): SessionRec
       });
       db.event(String(run.session_id), String(run.id), 'run.interrupted', { reason: 'owner_lost' });
     }
+    const uncertainBatches = uncertainFileEditBatches(db, executions);
     for (const execution of executions) {
       if (BigInt(execution.result_revision!) >= 9223372036854775807n)
         throw new AgentError('sequence_exhausted');
       const model = execution.kind === 'model';
-      const unstarted = execution.state === 'planned' && execution.dispatched === 0n;
+      const batch = uncertainBatches.get(String(execution.id));
+      const unstarted = !batch && execution.state === 'planned' && execution.dispatched === 0n;
       db.run(
         'UPDATE execution SET state=?,result_json=?,result_revision=result_revision+1 WHERE id=?',
         unstarted ? 'cancelled' : model ? 'failed' : 'outcome_unknown',
@@ -366,6 +369,14 @@ export function reconcileSession(db: SqliteOperations, input: Input): SessionRec
           incomplete: model,
           reconciliationCommandId: input.commandId,
           evidenceSource: 'owner_lost',
+          ...(batch
+            ? {
+                outcome: 'outcome_unknown',
+                content:
+                  'The shared file edit outcome could not be confirmed. Do not repeat this edit.',
+                details: { kind: 'file_edit_batch@1', ...batch, code: 'recovery_outcome_unknown' },
+              }
+            : {}),
         }),
         execution.id!,
       );

@@ -14,6 +14,8 @@
 
 批量回执按下标给出成功、HTTP 状态或具体失败码。至少一项成功时保留其他项的失败，全部失败时工具失败。`max_chars` 对每项选取正文；批量模型消息最多 32 KiB（计入 UTF‑8、JSON 转义及宿主回执）。超出预览的已选正文按页保存在原 Execution 作用域的 Artifact，`previewTruncated` 标注预览裁剪。网页内容放在独立的不可信数据区。Service 在新 Run 的 `snapshot.web.batch` 封存上述边界；仅有旧单页绑定的 Run 冷恢复及其子 Run 继续使用旧定义。[Runtime 回归](../../../test/isolated/web-fetch/core.test.ts) · [审批回归](../../../../../apps/service/test/isolated/web-permissions.test.ts)
 
+可复用授权只根据原料中每个初始 URL 的规范化 `URL.origin` 提供，同源才展示范围；固定协议、主机、端口与当前宿主策略。同一 Session 以后命中的原授权，经 Store 最终派发事务后由 Core 向 Tool 提供实际采用的范围。无持久范围使用的有效批准显式为 `null`，正式 Service 缺少该事实时在发起网络前失败。受该范围约束的页面和 robots 各跳在进入原网络 port 前核对来源；不符不触发对目标的准入、DNS、审计或连接，也不转换为普通 robots 回退。范围内 robots 缓存与普通一次性／完全访问分开；网络策略、DNS、公网限制和审计照旧。[Service 本机隔离回归](../../../../../apps/service/test/isolated/default-web-fetch.test.ts)核原范围批准、复用、单次及批量与两类跳转，不依赖真实外站。
+
 可信宿主提供 `PinnedWebNetworkOptions`，其中包含封存的 `off`、`public` 或精确主机 `allowlist` 策略，以及 `admitHop(binding,{signal})`。binding 携带原始 URL、当前跳转/资源及实际 execution、Session、原 Store 身份；资源准入独立于普通 Core 授权。所有 DNS 候选地址都要检查，允许地址与私有地址混合的响应在连接前失败。自有直连在 Node HTTP(S) lookup 中固定已验证地址，同时保留原 Host、TLS servername 和证书校验。不使用全局 fetch、ambient proxy/cookies/credentials 或自动跳转。
 
 `proxy` 是宿主已选定的 HTTP/HTTPS 入口与 `noProxy` 绕过表；低层 port 自身不读取环境或发现系统设置。HTTP/HTTPS 目标均通过 CONNECT 连接已验证的字面 IP，代理不能重新解析目标域名；原 Host、TLS SNI、证书链与主机名检查保留，HTTPS 代理本身也校验证书。仅支持无需认证的 HTTP/HTTPS 代理，拒绝 user-info、路径、查询与片段；不转发 Proxy-Authorization，不跟随 CONNECT 重定向，不在代理失败后直连。每次连接有独立 agent，关闭 ambient proxy；握手、响应体和取消均归原请求，不取消兄弟请求。可信 `certificateAuthority` 可提供所属 CA，证书/名称校验始终开启；该选项不接受 JSONC、模型或网页输入。

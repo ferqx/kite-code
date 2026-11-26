@@ -999,7 +999,12 @@ export function createPlanningValidation(
           throw new Error('plan_compensation_evidence_required');
         let receipt: Json = prior?.receipt ?? null;
         if (['completed', 'compensated'].includes(String(value.status))) {
-          const actual = await context.getExecution(string(value.executionId));
+          const actual = await context.getExecution(string(value.executionId)).catch((error) => {
+            // This reader is scoped to the plan's Session. An inaccessible receipt
+            // is not plan evidence, just like a missing one; no progress was written.
+            if (error instanceof AgentError && error.code === 'permission_denied') return null;
+            throw error;
+          });
           if (
             actual?.status !== 'succeeded' ||
             actual.sessionId !== context.sessionId ||

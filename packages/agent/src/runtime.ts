@@ -110,6 +110,7 @@ import {
   runStartedEvent,
 } from './extensions/lifecycle';
 import { isAgentCreationTaskTool, isRootAgentObservationTaskTool } from './extensions/task/roles';
+import { consecutiveFileEditCandidates } from './file-edit-batch-plan';
 import { inputFileContent, inputFileReferences } from './input-files';
 import { decodeInputImage, inputImages, matchesImageType, validInputImage } from './input-images';
 import {
@@ -1458,6 +1459,7 @@ export class AgentRuntime {
     };
     return behavior.authorizeChild(request, decision, context, {
       worktree: () => this.options.store.resolveWorktreeAuthorization(input),
+      shell: (proof) => this.options.store.resolveShellAuthorization({ ...input, proof }),
     });
   }
   private reviewBinding(behavior: TrustedToolBehavior): ToolBehaviorBinding {
@@ -10056,6 +10058,16 @@ export class AgentRuntime {
       };
       let toolAdmission: ReturnType<typeof createToolDispatchBatch> | undefined;
       let toolBatchSize: number | undefined;
+      type FileBatch = {
+        calls: readonly import('./storage/types').ToolCall[];
+        independent?: ReadonlyMap<string, ExecutionRecord>;
+        result: Promise<ReadonlyMap<string, import('./execution').ToolExecutionResult> | null>;
+        resolve: (
+          value: ReadonlyMap<string, import('./execution').ToolExecutionResult> | null,
+        ) => void;
+        reject: (error: unknown) => void;
+      };
+      const fileBatches = new Map<string, FileBatch>();
       let recoveredContextRefreshOf = resumed?.contextRefreshOf;
       let recoveredModelRetry = resumed?.modelRetry;
       let recoveredOverflow = resumed?.overflow;
@@ -10114,6 +10126,24 @@ export class AgentRuntime {
         beginToolBatch: (calls, signal, cancel) => {
           toolBatchActive = true;
           toolBatchSize = calls.length;
+          fileBatches.clear();
+          if (!recoveredResponse || recoveredResponse.response.toolCalls !== calls) {
+            for (const batch of consecutiveFileEditCandidates(calls)) {
+              const deferred = Promise.withResolvers<ReadonlyMap<
+                string,
+                import('./execution').ToolExecutionResult
+              > | null>();
+              // An unstarted companion must not surface an unhandled rejection.
+              void deferred.promise.catch(() => {});
+              const state = {
+                calls: batch,
+                result: deferred.promise,
+                resolve: deferred.resolve,
+                reject: deferred.reject,
+              };
+              for (const call of batch) fileBatches.set(call.id, state);
+            }
+          }
           const current = orderedToolAdmission
             ? createToolDispatchBatch(
                 calls.map((call) => call.id),
@@ -10128,6 +10158,7 @@ export class AgentRuntime {
               current?.finish();
               toolBatchActive = false;
               toolBatchSize = undefined;
+              fileBatches.clear();
               if (toolAdmission === current) toolAdmission = undefined;
             },
           };
@@ -10692,300 +10723,311 @@ export class AgentRuntime {
           }
         },
         executeTool: async (call, stepId, source, signal) => {
-          const decisionSources = structuredClone(captured);
-          const modelRequests = new Map(structuredClone([...capturedRequests.entries()]));
-          const decisionRequests = new Map(modelRequests);
-          const request = toolSourceRequest(call);
-          decisionRequests.set(`${call.name}:${await semanticDigest(request.input)}`, request);
-          const decisionInputVersion = capturedInputVersion;
-          const decisionCapabilities = capabilityFingerprint;
-          const decisionBindings = scope.bindings;
-          const decisionSelection = sourceSelection;
-          const definition = decisionBindings.tools.get(call.name);
-          const skillRead = isSkillRead(definition, source);
-          const readBehavior =
-            definition?.id === 'files.read'
-              ? decisionBindings.toolBehaviors?.find(
-                  ({ capability, workspaceRead }) =>
-                    workspaceRead &&
-                    capability.kind === 'tool' &&
-                    capability.definitionId === definition.id &&
-                    capability.definitionVersion === definition.version,
-                )
-              : undefined;
-          const digestSources = (sources: ContextSource[]) =>
-            semanticDigest(JSON.parse(JSON.stringify(sources)) as Json);
-          let continuationSources = decisionSources;
-          let decisionDigest = await digestSources(continuationSources);
-          const checkWorkspaceRead = async (executionId: string): Promise<boolean> => {
-            const workspaceRead = readBehavior?.workspaceRead;
-            if (!workspaceRead || !decisionBindings.executionRoot) return false;
-            const [model, tool] = await Promise.all([
-              this.options.store.getExecution(source),
-              this.options.store.getExecution(executionId),
-            ]);
-            if (
-              model?.kind !== 'model' ||
-              model.status !== 'succeeded' ||
-              model.modelDispatched !== true ||
-              model.runId !== run.id ||
-              model.sessionId !== run.sessionId ||
-              model.originStoreId !== run.originStoreId ||
-              model.stepId !== stepId ||
-              tool?.kind !== 'tool' ||
-              tool.status !== 'planned' ||
-              tool.runId !== run.id ||
-              tool.sessionId !== run.sessionId ||
-              tool.originStoreId !== run.originStoreId ||
-              tool.stepId !== stepId ||
-              tool.callId !== call.id ||
-              tool.definitionId !== definition?.id ||
-              tool.definitionVersion !== definition.version ||
-              canonicalJson(tool.input) !== canonicalJson(request.input)
-            )
-              return false;
-            const modelSource = model.decisionSource as Record<string, Json>;
-            const toolSource = tool.decisionSource as Record<string, Json>;
-            const expectedRoot = canonicalJson(decisionBindings.executionRoot as unknown as Json);
-            if (
-              toolSource?.modelExecutionId !== model.id ||
-              canonicalJson(toolSource.executionRoot ?? null) !== expectedRoot ||
-              canonicalJson(modelSource?.executionRoot ?? null) !== expectedRoot ||
-              !Array.isArray(modelSource?.toolBindings) ||
-              !modelSource.toolBindings.some(
-                (value) =>
-                  canonicalJson(value) ===
-                  canonicalJson({
-                    id: definition.id,
-                    version: definition.version,
-                    extensionId: 'builtin.files',
-                  }),
-              ) ||
-              !Array.isArray(modelSource.toolBehaviorBindings) ||
-              !modelSource.toolBehaviorBindings.some(
-                (value) =>
-                  canonicalJson(value) ===
-                  canonicalJson(this.reviewBinding(readBehavior) as unknown as Json),
-              )
-            )
-              return false;
-            const route = await workspaceRead({
-              kind: 'tool',
-              sessionId: run.sessionId,
-              runId: run.id,
-              executionId,
-              definitionId: definition.id,
-              definitionVersion: definition.version,
-              input: request.input,
-              signal,
-            });
-            if (!route) return false;
-            if (canonicalJson(route.root as unknown as Json) !== expectedRoot)
-              throw new AgentError('execution_root_changed');
-            const root = fileURLToPath(route.root.effectiveRootUri);
-            const contains = (directory: string, path: string) => {
-              const child = relative(directory, path);
-              return child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child);
-            };
-            const project = (source: ContextSource) =>
-              source.kind === 'project_instruction' &&
-              source.id.startsWith(`project:${scope.workspaceId}:`) &&
-              source.role === 'user' &&
-              source.placement === 'after_history';
-            const knowledge = (source: ContextSource) =>
-              source.scope === 'run-knowledge' &&
-              (source.kind === 'skill' ||
-                source.kind === 'skill_resource' ||
-                source.kind === 'skill_catalogue');
-            const previous = continuationSources.filter(
-              (source) =>
-                !knowledge(source) &&
-                (!project(source) ||
-                  (contains(root, source.scope) && contains(source.scope, dirname(route.path)))),
-            );
-            const hostSources = new Map<string, ContextSource>();
-            const current = await capture(
-              decisionRequests.values(),
-              decisionBindings,
-              hostSources,
-              {
-                ...(decisionSelection ?? { skillReads: [], skillResourceIds: new Set<string>() }),
-                workspaceRead: request,
-              },
-            );
-            const known = new Set(previous.map(({ id }) => id));
-            const additions = current.filter(({ id }) => !known.has(id));
-            const previouslyObserved = [...modelRequests.values()].flatMap((entry) => {
-              const path = projectToolPath(entry);
-              return path === undefined ? [] : [resolve(root, path)];
-            });
-            if (
-              (await digestSources(current.filter(({ id }) => known.has(id)))) !==
-                (await digestSources(previous)) ||
-              additions.some(
-                (source) =>
-                  !project(source) ||
-                  source.scope === root ||
-                  canonicalJson(source as unknown as Json) !==
-                    canonicalJson((hostSources.get(source.id) ?? null) as unknown as Json) ||
-                  previouslyObserved.some((path) => contains(source.scope, path)),
-              )
-            )
-              throw new AgentError('context_refresh_required');
-            return true;
-          };
-          const checkToolDecision = async (executionId?: string) => {
-            if (inputVersion !== decisionInputVersion)
-              throw new AgentError('superseded_by_user_input');
-            await checkCapabilities(decisionCapabilities);
-            // The host Skill adapter validates the requested knowledge at the point of read.
-            // Sibling results and other Model sources are not authority for that read.
-            if (skillRead) return;
-            if (executionId && (await checkWorkspaceRead(executionId))) return;
-            const hostSources = new Map<string, ContextSource>();
-            const current = await capture(
-              decisionRequests.values(),
-              decisionBindings,
-              hostSources,
-              decisionSelection,
-            );
-            if ((await digestSources(current)) === decisionDigest) return;
-            const known = new Set(continuationSources.map((source) => source.id));
-            const additions = current.filter((source) => !known.has(source.id));
-            if (
-              definition?.contextDiscovery === 'read_only' &&
-              additions.length > 0 &&
-              additions.every(
-                (source) =>
-                  source.kind === 'project_instruction' &&
-                  source.role === 'user' &&
-                  source.placement === 'after_history' &&
-                  canonicalJson(source as unknown as Json) ===
-                    canonicalJson((hostSources.get(source.id) ?? null) as unknown as Json),
-              ) &&
-              (await digestSources(current.filter((source) => known.has(source.id)))) ===
-                decisionDigest &&
-              (await digestSources(
-                await capture(
-                  modelRequests.values(),
-                  decisionBindings,
-                  undefined,
-                  decisionSelection,
-                ),
-              )) === decisionDigest
-            )
-              // A scoped read observes new instructions without pretending the old Model
-              // already used them. The next Model captures them with the actual results.
-              return;
-            throw new AgentError('context_refresh_required');
-          };
-          const onRequirementsRegistered = async (
-            transition: import('./execution').RequirementRegistrationTransition,
-          ) => {
-            if (
-              transition.runId !== scope.run.id ||
-              transition.before.some(
-                (ref) =>
-                  !transition.after.some(
-                    (next) =>
-                      canonicalJson(ref as unknown as Json) ===
-                      canonicalJson(next as unknown as Json),
-                  ),
-              )
-            )
-              throw new AgentError('requirement_scope_mismatch');
-            const additions = transition.after.filter(
-              (ref) =>
-                !transition.before.some(
-                  (previous) =>
-                    canonicalJson(previous as unknown as Json) ===
-                    canonicalJson(ref as unknown as Json),
-                ),
-            );
-            if (
-              additions.some(
-                (ref) =>
-                  ref.extensionId !== transition.extensionId ||
-                  ref.runId !== scope.run.id ||
-                  ref.sessionId !== scope.run.sessionId ||
-                  ref.originStoreId !== scope.run.originStoreId,
-              )
-            )
-              throw new AgentError('requirement_scope_mismatch');
-            const actual = await this.options.store.getExecution(transition.executionId);
-            const origin = actual ? await this.nearestParentRun(actual) : null;
-            const parent = origin?.ancestor;
-            if (
-              !actual ||
-              actual.kind !== 'tool' ||
-              actual.attempt !== transition.attempt ||
-              actual.cancelRequestedAt !== null ||
-              !['dispatching', 'running'].includes(actual.status) ||
-              actual.sessionId !== scope.run.sessionId ||
-              actual.originStoreId !== scope.run.originStoreId ||
-              origin?.run?.id !== scope.run.id ||
-              parent?.kind !== 'tool' ||
-              parent.cancelRequestedAt !== null ||
-              !['dispatching', 'running'].includes(parent.status) ||
-              parent.definitionId !== definition?.id ||
-              parent.definitionVersion !== definition?.version ||
-              parent.callId !== call.id ||
-              parent.stepId !== stepId ||
-              !decisionBindings.extensions.some(
-                (extension) =>
-                  extension.id === transition.extensionId &&
-                  extension.tools?.some(
-                    (tool) =>
-                      tool.id === actual.definitionId && tool.version === actual.definitionVersion,
-                  ),
-              )
-            )
-              throw new AgentError('requirement_scope_mismatch');
-            if (!additions.length) {
-              await checkToolDecision();
-              return;
+          const batch = fileBatches.get(call.id);
+          const batchLeader = batch?.calls[0]?.id === call.id;
+          if (batch && !batchLeader) {
+            const covered = (await batch.result)?.get(call.id);
+            if (covered) {
+              // This advances the ordered queue only; the durable companion was not dispatched.
+              toolAdmission?.forCall(call.id)?.dispatched();
+              return covered;
             }
-            if (inputVersion !== decisionInputVersion)
-              throw new AgentError('superseded_by_user_input');
-            await checkCapabilities(decisionCapabilities);
-            const current = await capture(
-              decisionRequests.values(),
-              decisionBindings,
-              undefined,
-              decisionSelection,
-            );
-            if (current.length !== continuationSources.length)
-              throw new AgentError('context_refresh_required');
-            for (const previous of continuationSources) {
-              const next = current.find((source) => source.id === previous.id);
-              if (!next) throw new AgentError('context_refresh_required');
+          }
+          try {
+            const decisionSources = structuredClone(captured);
+            const modelRequests = new Map(structuredClone([...capturedRequests.entries()]));
+            const decisionRequests = new Map(modelRequests);
+            const request = toolSourceRequest(call);
+            decisionRequests.set(`${call.name}:${await semanticDigest(request.input)}`, request);
+            const decisionInputVersion = capturedInputVersion;
+            const decisionCapabilities = capabilityFingerprint;
+            const decisionBindings = scope.bindings;
+            const decisionSelection = sourceSelection;
+            const definition = decisionBindings.tools.get(call.name);
+            const skillRead = isSkillRead(definition, source);
+            const readBehavior =
+              definition?.id === 'files.read'
+                ? decisionBindings.toolBehaviors?.find(
+                    ({ capability, workspaceRead }) =>
+                      workspaceRead &&
+                      capability.kind === 'tool' &&
+                      capability.definitionId === definition.id &&
+                      capability.definitionVersion === definition.version,
+                  )
+                : undefined;
+            const digestSources = (sources: ContextSource[]) =>
+              semanticDigest(JSON.parse(JSON.stringify(sources)) as Json);
+            let continuationSources = decisionSources;
+            let decisionDigest = await digestSources(continuationSources);
+            const checkWorkspaceRead = async (executionId: string): Promise<boolean> => {
+              const workspaceRead = readBehavior?.workspaceRead;
+              if (!workspaceRead || !decisionBindings.executionRoot) return false;
+              const [model, tool] = await Promise.all([
+                this.options.store.getExecution(source),
+                this.options.store.getExecution(executionId),
+              ]);
               if (
-                canonicalJson(previous as unknown as Json) ===
-                canonicalJson(next as unknown as Json)
+                model?.kind !== 'model' ||
+                model.status !== 'succeeded' ||
+                model.modelDispatched !== true ||
+                model.runId !== run.id ||
+                model.sessionId !== run.sessionId ||
+                model.originStoreId !== run.originStoreId ||
+                model.stepId !== stepId ||
+                tool?.kind !== 'tool' ||
+                tool.status !== 'planned' ||
+                tool.runId !== run.id ||
+                tool.sessionId !== run.sessionId ||
+                tool.originStoreId !== run.originStoreId ||
+                tool.stepId !== stepId ||
+                tool.callId !== call.id ||
+                tool.definitionId !== definition?.id ||
+                tool.definitionVersion !== definition.version ||
+                canonicalJson(tool.input) !== canonicalJson(request.input)
               )
-                continue;
+                return false;
+              const modelSource = model.decisionSource as Record<string, Json>;
+              const toolSource = tool.decisionSource as Record<string, Json>;
+              const expectedRoot = canonicalJson(decisionBindings.executionRoot as unknown as Json);
               if (
-                !(
-                  previous.id.startsWith(`${transition.extensionId}:`) &&
-                  previous.kind === 'runtime_state' &&
-                  next.kind === previous.kind &&
-                  previous.role === 'user' &&
-                  next.role === previous.role &&
-                  previous.placement === 'runtime' &&
-                  next.placement === previous.placement &&
-                  previous.scope === scope.run.sessionId &&
-                  next.scope === previous.scope
+                toolSource?.modelExecutionId !== model.id ||
+                canonicalJson(toolSource.executionRoot ?? null) !== expectedRoot ||
+                canonicalJson(modelSource?.executionRoot ?? null) !== expectedRoot ||
+                !Array.isArray(modelSource?.toolBindings) ||
+                !modelSource.toolBindings.some(
+                  (value) =>
+                    canonicalJson(value) ===
+                    canonicalJson({
+                      id: definition.id,
+                      version: definition.version,
+                      extensionId: 'builtin.files',
+                    }),
+                ) ||
+                !Array.isArray(modelSource.toolBehaviorBindings) ||
+                !modelSource.toolBehaviorBindings.some(
+                  (value) =>
+                    canonicalJson(value) ===
+                    canonicalJson(this.reviewBinding(readBehavior) as unknown as Json),
+                )
+              )
+                return false;
+              const route = await workspaceRead({
+                kind: 'tool',
+                sessionId: run.sessionId,
+                runId: run.id,
+                executionId,
+                definitionId: definition.id,
+                definitionVersion: definition.version,
+                input: request.input,
+                signal,
+              });
+              if (!route) return false;
+              if (canonicalJson(route.root as unknown as Json) !== expectedRoot)
+                throw new AgentError('execution_root_changed');
+              const root = fileURLToPath(route.root.effectiveRootUri);
+              const contains = (directory: string, path: string) => {
+                const child = relative(directory, path);
+                return child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child);
+              };
+              const project = (source: ContextSource) =>
+                source.kind === 'project_instruction' &&
+                source.id.startsWith(`project:${scope.workspaceId}:`) &&
+                source.role === 'user' &&
+                source.placement === 'after_history';
+              const knowledge = (source: ContextSource) =>
+                source.scope === 'run-knowledge' &&
+                (source.kind === 'skill' ||
+                  source.kind === 'skill_resource' ||
+                  source.kind === 'skill_catalogue');
+              const previous = continuationSources.filter(
+                (source) =>
+                  !knowledge(source) &&
+                  (!project(source) ||
+                    (contains(root, source.scope) && contains(source.scope, dirname(route.path)))),
+              );
+              const hostSources = new Map<string, ContextSource>();
+              const current = await capture(
+                decisionRequests.values(),
+                decisionBindings,
+                hostSources,
+                {
+                  ...(decisionSelection ?? { skillReads: [], skillResourceIds: new Set<string>() }),
+                  workspaceRead: request,
+                },
+              );
+              const known = new Set(previous.map(({ id }) => id));
+              const additions = current.filter(({ id }) => !known.has(id));
+              const previouslyObserved = [...modelRequests.values()].flatMap((entry) => {
+                const path = projectToolPath(entry);
+                return path === undefined ? [] : [resolve(root, path)];
+              });
+              if (
+                (await digestSources(current.filter(({ id }) => known.has(id)))) !==
+                  (await digestSources(previous)) ||
+                additions.some(
+                  (source) =>
+                    !project(source) ||
+                    source.scope === root ||
+                    canonicalJson(source as unknown as Json) !==
+                      canonicalJson((hostSources.get(source.id) ?? null) as unknown as Json) ||
+                    previouslyObserved.some((path) => contains(source.scope, path)),
                 )
               )
                 throw new AgentError('context_refresh_required');
-            }
-            // Only this exact Tool continuation adopts the observation caused by its own
-            // monotonic registration. Original Model/source evidence and siblings stay unchanged.
-            continuationSources = structuredClone(current);
-            decisionDigest = await digestSources(continuationSources);
-          };
-          const outcome = await this.execution.toolExecution(
-            {
+              return true;
+            };
+            const checkToolDecision = async (executionId?: string) => {
+              if (inputVersion !== decisionInputVersion)
+                throw new AgentError('superseded_by_user_input');
+              await checkCapabilities(decisionCapabilities);
+              // The host Skill adapter validates the requested knowledge at the point of read.
+              // Sibling results and other Model sources are not authority for that read.
+              if (skillRead) return;
+              if (executionId && (await checkWorkspaceRead(executionId))) return;
+              const hostSources = new Map<string, ContextSource>();
+              const current = await capture(
+                decisionRequests.values(),
+                decisionBindings,
+                hostSources,
+                decisionSelection,
+              );
+              if ((await digestSources(current)) === decisionDigest) return;
+              const known = new Set(continuationSources.map((source) => source.id));
+              const additions = current.filter((source) => !known.has(source.id));
+              if (
+                definition?.contextDiscovery === 'read_only' &&
+                additions.length > 0 &&
+                additions.every(
+                  (source) =>
+                    source.kind === 'project_instruction' &&
+                    source.role === 'user' &&
+                    source.placement === 'after_history' &&
+                    canonicalJson(source as unknown as Json) ===
+                      canonicalJson((hostSources.get(source.id) ?? null) as unknown as Json),
+                ) &&
+                (await digestSources(current.filter((source) => known.has(source.id)))) ===
+                  decisionDigest &&
+                (await digestSources(
+                  await capture(
+                    modelRequests.values(),
+                    decisionBindings,
+                    undefined,
+                    decisionSelection,
+                  ),
+                )) === decisionDigest
+              )
+                // A scoped read observes new instructions without pretending the old Model
+                // already used them. The next Model captures them with the actual results.
+                return;
+              throw new AgentError('context_refresh_required');
+            };
+            const onRequirementsRegistered = async (
+              transition: import('./execution').RequirementRegistrationTransition,
+            ) => {
+              if (
+                transition.runId !== scope.run.id ||
+                transition.before.some(
+                  (ref) =>
+                    !transition.after.some(
+                      (next) =>
+                        canonicalJson(ref as unknown as Json) ===
+                        canonicalJson(next as unknown as Json),
+                    ),
+                )
+              )
+                throw new AgentError('requirement_scope_mismatch');
+              const additions = transition.after.filter(
+                (ref) =>
+                  !transition.before.some(
+                    (previous) =>
+                      canonicalJson(previous as unknown as Json) ===
+                      canonicalJson(ref as unknown as Json),
+                  ),
+              );
+              if (
+                additions.some(
+                  (ref) =>
+                    ref.extensionId !== transition.extensionId ||
+                    ref.runId !== scope.run.id ||
+                    ref.sessionId !== scope.run.sessionId ||
+                    ref.originStoreId !== scope.run.originStoreId,
+                )
+              )
+                throw new AgentError('requirement_scope_mismatch');
+              const actual = await this.options.store.getExecution(transition.executionId);
+              const origin = actual ? await this.nearestParentRun(actual) : null;
+              const parent = origin?.ancestor;
+              if (
+                !actual ||
+                actual.kind !== 'tool' ||
+                actual.attempt !== transition.attempt ||
+                actual.cancelRequestedAt !== null ||
+                !['dispatching', 'running'].includes(actual.status) ||
+                actual.sessionId !== scope.run.sessionId ||
+                actual.originStoreId !== scope.run.originStoreId ||
+                origin?.run?.id !== scope.run.id ||
+                parent?.kind !== 'tool' ||
+                parent.cancelRequestedAt !== null ||
+                !['dispatching', 'running'].includes(parent.status) ||
+                parent.definitionId !== definition?.id ||
+                parent.definitionVersion !== definition?.version ||
+                parent.callId !== call.id ||
+                parent.stepId !== stepId ||
+                !decisionBindings.extensions.some(
+                  (extension) =>
+                    extension.id === transition.extensionId &&
+                    extension.tools?.some(
+                      (tool) =>
+                        tool.id === actual.definitionId &&
+                        tool.version === actual.definitionVersion,
+                    ),
+                )
+              )
+                throw new AgentError('requirement_scope_mismatch');
+              if (!additions.length) {
+                await checkToolDecision();
+                return;
+              }
+              if (inputVersion !== decisionInputVersion)
+                throw new AgentError('superseded_by_user_input');
+              await checkCapabilities(decisionCapabilities);
+              const current = await capture(
+                decisionRequests.values(),
+                decisionBindings,
+                undefined,
+                decisionSelection,
+              );
+              if (current.length !== continuationSources.length)
+                throw new AgentError('context_refresh_required');
+              for (const previous of continuationSources) {
+                const next = current.find((source) => source.id === previous.id);
+                if (!next) throw new AgentError('context_refresh_required');
+                if (
+                  canonicalJson(previous as unknown as Json) ===
+                  canonicalJson(next as unknown as Json)
+                )
+                  continue;
+                if (
+                  !(
+                    previous.id.startsWith(`${transition.extensionId}:`) &&
+                    previous.kind === 'runtime_state' &&
+                    next.kind === previous.kind &&
+                    previous.role === 'user' &&
+                    next.role === previous.role &&
+                    previous.placement === 'runtime' &&
+                    next.placement === previous.placement &&
+                    previous.scope === scope.run.sessionId &&
+                    next.scope === previous.scope
+                  )
+                )
+                  throw new AgentError('context_refresh_required');
+              }
+              // Only this exact Tool continuation adopts the observation caused by its own
+              // monotonic registration. Original Model/source evidence and siblings stay unchanged.
+              continuationSources = structuredClone(current);
+              decisionDigest = await digestSources(continuationSources);
+            };
+            const toolScope = {
               ...scope,
               signal,
               bindings: decisionBindings,
@@ -10994,26 +11036,48 @@ export class AgentRuntime {
               onRequirementsRegistered,
               toolAdmission: toolAdmission?.forCall(call.id),
               toolBatchSize,
-            },
-            definition,
-            call,
-            stepId,
-            source,
-            undefined,
-            (() => {
-              const planned = resumed?.plannedTools.get(call.id);
-              return planned?.stepId === stepId &&
-                (planned.decisionSource as Record<string, Json>).modelExecutionId === source
-                ? planned
-                : undefined;
-            })(),
-          );
-          if (
-            outcome.result.outcome === 'succeeded' &&
-            outcome.result.control?.kind === 'stop_work'
-          )
-            await this.observeOwnedCancellation();
-          return outcome;
+            };
+            if (batch && batchLeader) {
+              const results = await this.execution.fileEditBatchExecution(
+                toolScope,
+                definition,
+                batch.calls,
+                stepId,
+                source,
+                (originals) => {
+                  batch.independent = originals;
+                  batch.resolve(null);
+                },
+              );
+              batch.resolve(results);
+              if (results) return results.get(call.id)!;
+            }
+            const outcome = await this.execution.toolExecution(
+              toolScope,
+              definition,
+              call,
+              stepId,
+              source,
+              undefined,
+              (() => {
+                const planned =
+                  batch?.independent?.get(call.id) ?? resumed?.plannedTools.get(call.id);
+                return planned?.stepId === stepId &&
+                  (planned.decisionSource as Record<string, Json>).modelExecutionId === source
+                  ? planned
+                  : undefined;
+              })(),
+            );
+            if (
+              outcome.result.outcome === 'succeeded' &&
+              outcome.result.control?.kind === 'stop_work'
+            )
+              await this.observeOwnedCancellation();
+            return outcome;
+          } catch (error) {
+            if (batchLeader) batch?.reject(error);
+            throw error;
+          }
         },
       };
       if (resumed?.modelRequest && resumed.modelSource) {
@@ -12207,6 +12271,11 @@ export class AgentRuntime {
       throw new AgentError('interaction_binding_changed');
     }
     if (!complete || typeof complete !== 'object' || Array.isArray(complete))
+      throw new AgentError('interaction_binding_changed');
+    if (
+      canonicalJson(complete.fileEditBatch ?? null) !==
+      canonicalJson((actual as Record<string, Json>).fileEditBatch ?? null)
+    )
       throw new AgentError('interaction_binding_changed');
     for (const [key, value] of Object.entries(actual as { [key: string]: Json }))
       if (canonicalJson(complete[key]!) !== canonicalJson(value))

@@ -334,7 +334,32 @@ function toolTarget(message: Message): string | undefined {
   }
 }
 
+/** A verified human denial never reached the adapter; unknown or independently useful
+ * result material is not classified as the bare denial receipt. */
+function confirmedUserRejection(message: Message): boolean {
+  const plainDenial = (text?: string) => !text?.trim() || text.trim() === 'approval_denied';
+  return (
+    message.settled === true &&
+    !message.executionUnconfirmed &&
+    !message.decisionRefresh &&
+    (message.status === 'failed' || message.status === 'rejected') &&
+    message.dispatchCommitted === false &&
+    message.approval?.source === 'user' &&
+    message.approval.state === 'rejected' &&
+    !!message.approval.interactionId &&
+    !message.shell?.jobStatus &&
+    !message.toolProgress &&
+    message.toolResult?.exitCode === undefined &&
+    message.toolResult?.terminationReason === undefined &&
+    plainDenial(message.text) &&
+    plainDenial(message.approval.reason) &&
+    plainDenial(message.toolResult?.stderr) &&
+    plainDenial(message.toolResult?.stdout)
+  );
+}
+
 function hasToolIssue(message: Message): boolean {
+  if (confirmedUserRejection(message)) return false;
   return (
     ['failed', 'rejected', 'unknown'].includes(message.status ?? '') ||
     ['rejected', 'unavailable', 'awaiting_user'].includes(message.approval?.state ?? '')
@@ -345,7 +370,7 @@ function needsResultDetails(message: Message): boolean {
   return (
     hasToolIssue(message) ||
     message.status === 'cancelled' ||
-    message.status === 'not_executed' ||
+    (message.status === 'not_executed' && !message.fileEditBatchRejectedMember) ||
     message.fileMissing === true
   );
 }
@@ -607,7 +632,9 @@ function approvalLabel(message: Message): string | undefined {
   if (!approval) return;
   switch (approval.state) {
     case 'submitted':
-      return '已提交批准，待核对';
+      return '审批答复已提交';
+    case 'submission_unconfirmed':
+      return undefined;
     case 'unavailable':
       return '自动审批结果未知';
     case 'cancelled':
@@ -640,6 +667,7 @@ function ToolApproval({
   summaryFocused?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  if (confirmedUserRejection(message)) return <span className="tool-approval">{label}</span>;
   const approved = message.approval?.state === 'approved';
   const autoRejected = message.approval?.source === 'auto' && message.approval.state === 'rejected';
   const icon = approved ? ShieldCheckIcon : autoRejected ? ShieldAlertIcon : Shield01Icon;
@@ -687,6 +715,7 @@ function createdChildTask(message: Message): boolean {
 }
 
 function executionLabel(message: Message, diagnostics: boolean) {
+  if (message.fileEditBatchRejectedMember) return '';
   if (executionUnconfirmed(message)) return diagnostics ? '执行状态待核实' : '';
   if (message.fileMissing && message.toolName === 'read_file' && message.status === 'completed')
     return '文件不存在';
@@ -726,7 +755,7 @@ function executionLabel(message: Message, diagnostics: boolean) {
 // Trace only decorates facts already present in the host projection. Inactive
 // streams, cancellation and unknown results never imply an execution failure.
 function traceStatus(message: Message): 'running' | 'error' | 'pending' | undefined {
-  if (executionUnconfirmed(message)) return undefined;
+  if (executionUnconfirmed(message) || confirmedUserRejection(message)) return undefined;
   if (!message.settled && (message.status === 'running' || automaticChecking(message)))
     return 'running';
   if (message.status === 'failed' || message.status === 'rejected') return 'error';
@@ -1172,9 +1201,12 @@ export function ToolActivity({
   const running = messages.some(
     (item) => !executionUnconfirmed(item) && !item.settled && item.status === 'running',
   );
-  const issues = messages.filter((item) =>
-    ['failed', 'rejected', 'unknown'].includes(item.status ?? ''),
+  const issues = messages.filter(
+    (item) =>
+      !confirmedUserRejection(item) &&
+      ['failed', 'rejected', 'unknown'].includes(item.status ?? ''),
   );
+  const originalDenied = !grouped && confirmedUserRejection(message);
   const childIssue = childProcess && issues.length > 0;
   const itemIssue = !grouped && (needsResultDetails(message) || childIssue);
   const waitFailure = !grouped && message.agentWait && message.status === 'failed';
@@ -1232,6 +1264,7 @@ export function ToolActivity({
     (!!renderFileChange || !!message.toolResult);
   const inlineEdit = hasDiff;
   const canExpand =
+    !originalDenied &&
     !agent &&
     !summaryOnly &&
     (grouped || itemIssue || message.status !== 'not_executed') &&

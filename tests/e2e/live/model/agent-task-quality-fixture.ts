@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute, relative } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { readModelExecutionId } from '../../../../packages/agent/src/model-identifier';
 
 /** Decode the display contract independently of the production formatter. */
 export function taskQualityPresentedRead(content: string) {
@@ -10,17 +11,23 @@ export function taskQualityPresentedRead(content: string) {
       lines[0] ?? '',
     );
   const referenceLine = lines[1]?.startsWith('evidence_ref=') ? 1 : 0;
+  const executionLine = lines[2 + referenceLine]?.startsWith('execution_id: ') ? 1 : 0;
   const size = /^Content \((\d+) UTF-8 bytes; starts on next line\):$/.exec(
-    lines[2 + referenceLine] ?? '',
+    lines[2 + referenceLine + executionLine] ?? '',
   );
   if (!match || !size || !lines[1 + referenceLine]?.startsWith('base_ref=')) return;
   try {
-    const text = lines.slice(3 + referenceLine).join('\n');
+    const text = lines.slice(3 + referenceLine + executionLine).join('\n');
     if (Buffer.byteLength(text) !== Number(size[1])) return;
     const window = match[3] === 'none' ? null : match[3]!.split('-').map(Number);
     const fromLine = Number(match[2]);
     if (fromLine < 1 || (window && window[0] !== fromLine)) return;
+    const executionId = executionLine
+      ? JSON.parse(lines[2 + referenceLine]!.slice('execution_id: '.length))
+      : undefined;
+    if (executionLine && (typeof executionId !== 'string' || !executionId.startsWith('e.'))) return;
     return {
+      ...(executionId === undefined ? {} : { executionId: readModelExecutionId(executionId) }),
       evidenceRef: referenceLine ? JSON.parse(lines[1]!.slice('evidence_ref='.length)) : undefined,
       path: JSON.parse(match[1]!),
       baseRef: JSON.parse(lines[1 + referenceLine]!.slice('base_ref='.length)) as string,
@@ -50,6 +57,7 @@ export function taskQualityReadMessageMatches(presented: string, original: strin
       (raw.selection.toLine === raw.selection.totalLines || raw.selection.totalLines === 0);
     return (
       (decoded.evidenceRef === undefined || decoded.evidenceRef === raw.executionId) &&
+      (decoded.executionId === undefined || decoded.executionId === raw.executionId) &&
       decoded.content === raw.content &&
       decoded.path === raw.path &&
       decoded.whole === whole &&

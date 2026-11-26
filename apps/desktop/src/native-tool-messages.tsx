@@ -352,6 +352,7 @@ export function desktopToolMessage(
       | 'ask'
       | 'authorization'
       | 'decisionRefresh'
+      | 'fileEditBatchRejectedMember'
       | 'fileMissing'
       | 'fileCreated'
       | 'images'
@@ -416,7 +417,7 @@ export function desktopToolMessage(
     id,
     role: 'tool',
     text:
-      planRead || webFetchBatch
+      planRead || webFetchBatch || fact.fileEditBatchRejectedMember
         ? ''
         : (waitText ??
           (messageAccepted
@@ -427,6 +428,7 @@ export function desktopToolMessage(
     ...(waitText ? { agentWait: true as const } : {}),
     ...(webFetchBatch ? { webFetchBatch } : {}),
     settled: !['planned', 'dispatching', 'running'].includes(fact.status),
+    ...(fact.fileEditBatchRejectedMember ? { fileEditBatchRejectedMember: true } : {}),
     ...desktopToolPresentation(fact),
     target: fact.target,
     ...(shell ? { shell } : {}),
@@ -449,7 +451,7 @@ export function desktopToolMessage(
         }
       : {}),
     status:
-      fact.status === 'failed' && fact.decisionRefresh
+      fact.status === 'failed' && (fact.decisionRefresh || fact.fileEditBatchRejectedMember)
         ? 'not_executed'
         : fact.status === 'succeeded'
           ? 'completed'
@@ -528,6 +530,7 @@ export function liveToolMessages(
   executionUnconfirmed = false,
   inputFacts: readonly NativeToolMessageFact[] = [],
   submittedInteractions: ReadonlySet<string> = new Set(),
+  unconfirmedApprovals: ReadonlySet<string> = new Set(),
 ): { message: DesktopMessage; execution: NativeToolExecution }[] {
   if (!selection) return [];
   const runIds = new Set(selection.runs.filter((run) => run.isActive).map((run) => run.id));
@@ -637,7 +640,9 @@ export function liveToolMessages(
                 approval: {
                   state: submittedInteractions.has(approval.id)
                     ? ('submitted' as const)
-                    : ('awaiting_user' as const),
+                    : unconfirmedApprovals.has(approval.id)
+                      ? ('submission_unconfirmed' as const)
+                      : ('awaiting_user' as const),
                   source: 'user' as const,
                   interactionId: approval.id,
                   reason: execution.authorization?.check?.reason ?? undefined,

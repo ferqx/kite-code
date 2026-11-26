@@ -39,7 +39,9 @@ export function createShellToolBehaviors(options: {
         definitionVersion: tool.version,
       })),
   );
-  const scoped = !!(options.snapshot as { host?: unknown }).host;
+  const shellSnapshot = options.snapshot as { host?: unknown; qualification?: unknown };
+  const scoped = !!shellSnapshot.host;
+  const attachedMac = scoped && shellSnapshot.qualification === 'macos_launchd_coalition_seatbelt';
   async function prepareParentProof(
     request: AuthorizationRequest,
     context?: ToolBehaviorContext,
@@ -114,6 +116,32 @@ export function createShellToolBehaviors(options: {
             contractRef: 'builtin.shell.risk-and-command',
             configurationDigest,
             prepareParentProof,
+            ...(kind === 'tool' && attachedMac
+              ? {
+                  async authorizeChild(request, decision, context, bridge) {
+                    if (
+                      request.kind !== 'job' ||
+                      request.definitionId !== 'shell.command' ||
+                      request.definitionVersion !== '1' ||
+                      !decision.approval ||
+                      decision.check
+                    )
+                      return null;
+                    const parentProof = await prepareParentProof(request, context);
+                    if (
+                      !parentProof ||
+                      typeof parentProof !== 'object' ||
+                      Array.isArray(parentProof) ||
+                      parentProof.cancelWithParent !== true
+                    )
+                      return null;
+                    return bridge.shell({
+                      ...parentProof,
+                      childInputDigest: grantDigest(request.input),
+                    });
+                  },
+                }
+              : {}),
             ...(enableReview
               ? {
                   autoReview: 'check' as const,
@@ -165,7 +193,22 @@ export function createShellToolBehaviors(options: {
                   },
                 }
               : {}),
-            async grantOffers(request): Promise<GrantCandidate[]> {
+            async grantOffers(request, mode): Promise<GrantCandidate[]> {
+              // The attached Mac Tool alone knows the full exact command identity.
+              // Do not offer a less specific Job range or a detached range that cannot
+              // cover both stages in Request Approval. Auto is unchanged.
+              if (
+                attachedMac &&
+                mode === 'accept_edits' &&
+                (kind === 'job' ||
+                  parseShellCommandInput(
+                    request.input,
+                    definition.id === 'shell.launch' ? 'launch' : 'execute',
+                    scoped,
+                  )?.cancellation !== 'attached')
+              )
+                return [];
+
               const commandDigest = await options.commandDigest(request);
               if (!commandDigest) return [];
               const input =

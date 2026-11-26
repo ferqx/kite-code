@@ -457,6 +457,8 @@ resolver 返回每 Run 的 `extensions`、`sources` 与 `dispose`。项目来源
 
 同一装配支持三种权限模式下的普通外部 `write_file`／`edit_file`，不增工具版本；请求批准先人批，Auto 先自动审核，Full 按有效权限直接执行。权限 refinement 接收 Agent 本次已读取并校验的 policy 隔离副本，普通与 Planning 链均透传，Service 不另读根偏好决定外写。执行与描述优先匹配会话输出、当前 Plan 和准确输入文件，再走通用外部文件与原外部只读适配；私有例外不被通用外部能力接管。外部适配独立核最终证明的所有权限叶及目标 revision，保留 trust、父子／计划／工具集合和受保护资源限制；可安全编辑的外部读提供 baseline，外部变化不进入 Workspace checkpoint。当前源码与确定性边界见[适配器](../../packages/agent/src/tools/full-access-files.ts)、[权限 owner](../../packages/agent/src/permissions/README.md)及[默认 Service 回归](test/isolated/full-external-files.test.ts)，真实模型结果单独记录。
 
+[普通外部文件编辑授权回归](test/isolated/external-file-approval.test.ts)验证后续范围限于原会话及准确文件位置：Store 冷重开后可复用，换文件、换会话或撤销后重新审批，读取仍独立审批。该验证不使用实际模型。
+
 默认装配把 Agent `filesNativeAssets()` 的加载器及整个 Node-API companion 纳入原 runtime assets，普通读取、外部路径和 checkpoint／restore 共用该保护。它只来自可信 public entry，JSONC／HTTP／Model 不能重标；Full 仍在 adapter 前拒绝。Windows 普通工作区读取的快速核验和实际文件操作都在持有根与祖先原生句柄期间，用 Bun `lstat` 复核会话执行根身份。原生卷标识与 File ID 继续用于原生文件身份和编辑基线。 [真实 Service 验证](test/isolated/files-native-boundary.test.ts)
 
 当前selected history按实际selection/upper完整分页；8192 Messages、64MiB累计来源证明、8MiB单页超限明确拒绝。历史capture verification改由私有`readOriginalRunSelection`从actual Run/Command pin读取当时选择，再按原trigger上界读取完整历史；当前point资格另核current selection。同Session保全Messages但换ID不会误拒旧点，排除trigger仍unavailable。已发布compression逐层核完整input/output/origin，前缀仅定位候选，真实User碰撞不被排除。生成摘要指令只按唯一准确 `sourceIds=[compressionId]` 及 user 身份从完整原输入定位；项目／Runtime 尾部来源不冒充该指令，不假设它位于最后，也不移除其他真实 User 或碰撞正文。restore逐项核原Source、Artifact EOF/hash/size及真实postbaseline；v2 journal/effect ledger保实际新inode或确认missing，v1只读不回填。默认full仍独立人类Ask，不继承原Tool/旧Store授权；原ID/cold只读原journal/carrier。
@@ -695,7 +697,7 @@ read/wait 只读原执行，沿用分页游标、高水位和 gap；wait 超时�
 
 [test/isolated/shell-configuration.test.ts](test/isolated/shell-configuration.test.ts)验证实际 SDK/SQLite/guardian、cwd/env、read/wait、真实 Auto 请求人工决定后的独立 Tool/Job 审批、请求批准外部写入/网络独立准入、实际 Auto 拒绝原因、三策略固定危险拒绝与零进程效果、强制 stop、后台原绑定及单槽跨 Session。持久权限另核根及默认 Task 子 Agent 的 Full 外部写、独立批准前零效果、批准后的 Workspace 范围和原 Command 不重放；直接可信 Job 适配器测试核嵌套混合策略取较严格范围，以及缺失或未知叶在进程效果前拒绝。源码树外[默认能力消费者](../../tests/isolated/unified-agent/formal-optional-capabilities.test.ts)和[平台 probe](../../tests/isolated/unified-agent/unified-platform.test.ts)核默认 Provider/Job、完整输出、processTreeStopped、cold 同结果/零重放。实际 fork/setsid、父退出、原身份信号和路径/网络边界归 [Jobs owner](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)；显式 POSIX 与固定 confined 仍保各自有限证据。默认开放不宣称全部资源、跨平台或 production release 资格。
 
-可信 command digest 固定 Tool/Job kind/definition/version、准确 command、attached/detached、host configuration/范围、canonical cwd、克隆 env、实际 guardian/Bun/Shell bytes hash 及 grace/output queue；只排除新的 operation key。默认值与 Job 一致：200ms、256KiB。Core 不按 Tool 名猜命令或剥字段，非 Shell 仍使用完整 input digest。相同命令只在当前 policy 提供 same_command 且最终权限/epoch/必要义务仍成立时复用，Tool/Job 授权独立；环境、范围或命令改变仍需重新核对。
+可信 command digest 固定 Tool/Job kind/definition/version、准确 command、attached/detached、host configuration/范围、canonical cwd、克隆 env、实际 guardian/Bun/Shell bytes hash 及 grace/output queue；只排除新的 operation key。默认值与 Job 一致：200ms、256KiB。Core 不按 Tool 名猜命令或剥字段，非 Shell 仍使用完整 input digest。相同命令只在当前 policy 提供 same_command 且最终权限/epoch/必要义务仍成立时复用，Tool 与 Job 仍独立核验；macOS 正式宿主在请求批准模式下，准确附着 Job 可以复核并消费同一父 Tool 的默认人工决定，不重复弹卡。环境、范围或命令改变仍需重新核对。
 
 ## 配置准备清理交接
 
@@ -708,6 +710,8 @@ read/wait 只读原执行，沿用分页游标、高水位和 gap；wait 超时�
 ## 默认 Web Fetch 装配
 
 默认 resolver 通过 [web-fetch-configuration.ts](src/web-fetch-configuration.ts)装配普通 `builtin.web@1` / `web_fetch@1`，缺省网络策略为 public。显式宿主 `createDefaultProcessConfiguration({webFetch?})` 继续独占其 network policy/admission、传输及可选 extractor，不读取自动代理或用户网络覆盖。显式 off/allowlist 与当前宿主 `admitHop` 继续约束原请求、robots 和每次跳转，普通 Tool 独立经过 Core 当前授权；元数据仍为 `network`/`unknown`、`safeRead:false`，off 为不可用。
+
+Web Fetch 精确同源授权由 Service 为实际可信 Web 绑定注册，配置摘要随实际选中的网络策略和传输变化。公开输入和 Tool 版本不变。Core 核实原 Session 及最终的授权提交；普通单次不受新的同源限制，使用已保存的范围时由 [Agent Web Fetch owner](../../packages/agent/src/tools/web-fetch/README.md) 在网络准入前限制原页、批量和 robots 的每次连接。
 
 普通默认宿主在选择含 `web_fetch` 的 Run 时，通过 [web-fetch-proxy.ts](src/web-fetch-proxy.ts)封存当前 HTTP(S)/NO_PROXY 环境（小写优先），无环境代理时读取 Windows HKCU Internet Settings 或 macOS `scutil --proxy` 的手动代理，Linux 使用环境变量；没有登记则直连。`ALL_PROXY`/`all_proxy` 不参与发现，只有这些变量的环境需显式提供受支持的 HTTP(S) 入口。系统查询使用固定程序和参数、隐藏窗口、1500ms/64KiB 上限，不执行 PAC/WPAD 或扫描端口。仅用户级 JSONC 可通过 `webFetch.proxy` 选择 auto/direct/无需认证 HTTP(S) 入口，通过 `webFetch.dns` 选择可信 HTTPS wire DNS 服务及公网 bootstrap IP；项目声明明确拒绝。用户配置格式归[手册](../../docs/handbook/features/models-and-configuration.md#网页网络配置)。自动设置不支持或读取失败封存为网页工具的准确失败，不妨碍文件任务；macOS 混合设置优先使用已登记的手动 HTTP(S) 入口。两个协议均已登记时各用对应入口，只有一个时共用该 CONNECT 入口。仅 SOCKS 返回 `web_proxy_protocol_unsupported`。手动配置错误明确阻止绑定，不丢失错误码。
 

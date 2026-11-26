@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
+import type { Json } from '@kite-ai/agent/extensions';
 import { builtinCapability, type CapabilityDescription } from '@kite-ai/agent/permissions';
 import {
   createPinnedWebNetworkPort,
   createWebFetchBindingFactory,
+  createWebFetchToolBehavior,
   type PinnedWebNetworkOptions,
   type WebExtractor,
   WebFetchError,
@@ -20,6 +22,7 @@ export function createWebFetchConfiguration(options: WebFetchConfigurationOption
   const policy = structuredClone(options.network.policy);
   const pinned = createPinnedWebNetworkPort(options.network);
   const factory = createWebFetchBindingFactory({
+    requireDispatchGrantProof: !options.unavailableReason,
     networkPort: options.unavailableReason
       ? {
           async request(_binding, { onStage }) {
@@ -31,6 +34,12 @@ export function createWebFetchConfiguration(options: WebFetchConfigurationOption
     ...(options.extractor ? { extractor: options.extractor } : {}),
   });
   const extension = factory.extension;
+  const ownExtensions = new WeakSet([extension]);
+  const bind = (batchEnabled = true) => {
+    const bound = factory.bind(batchEnabled);
+    ownExtensions.add(bound.extension);
+    return bound;
+  };
   const capabilities: CapabilityDescription[] = [
     {
       kind: 'tool',
@@ -86,10 +95,18 @@ export function createWebFetchConfiguration(options: WebFetchConfigurationOption
   const snapshot = { ...legacySnapshot, batch: webFetchBatchLimits };
   return {
     extension,
-    bind: factory.bind,
+    bind,
     capabilities,
     toolIds: ['web_fetch'] as readonly string[],
     snapshot,
+    toolBehaviorsFor: (selected: typeof extension) => {
+      const definition = ownExtensions.has(selected)
+        ? selected.tools?.find((tool) => tool.id === 'web_fetch' && tool.version === '1')
+        : undefined;
+      return definition && !options.unavailableReason
+        ? [createWebFetchToolBehavior(definition, snapshot as unknown as Json, policy)]
+        : [];
+    },
     snapshotFor: (batchEnabled: boolean) => (batchEnabled ? snapshot : legacySnapshot),
   };
 }

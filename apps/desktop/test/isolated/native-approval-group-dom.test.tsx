@@ -219,6 +219,77 @@ test('one paged card preserves exact decisions, attachment proof, stable child a
   }
 });
 
+test('only a matched reviewer handoff changes the pending approval heading', async () => {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+    IS_REACT_ACT_ENVIRONMENT: Reflect.get(globalThis, 'IS_REACT_ACT_ENVIRONMENT'),
+  };
+  const restore = prepareDesktopDom(dom);
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const host = dom.window.document.getElementById('root')!;
+  const root = createRoot(host);
+  const card = approval('reviewed', 'root');
+  const original = card.request as Record<string, unknown>;
+  const render = (request: Interaction['request']) =>
+    root.render(
+      <NativeApprovalGroup
+        interactions={[{ ...card, request }]}
+        storeId="store"
+        rootSessionId="root"
+        renderInteraction={() => <aside>original card</aside>}
+      />,
+    );
+  try {
+    for (const { request, heading } of [
+      { request: original, heading: '需要批准' },
+      {
+        request: {
+          ...original,
+          policy: { mode: 'auto', reason: 'authorization_check_unavailable' },
+        },
+        heading: '需要批准',
+      },
+      {
+        request: { ...original, policy: { reason: 'authorization_check_requires_user_approval' } },
+        heading: '需要批准',
+      },
+      {
+        request: { ...original, input: { approvalPresentation: 'reviewer_handoff' } },
+        heading: '需要批准',
+      },
+      {
+        request: { ...original, approvalPresentation: 'reviewer_handoff' },
+        heading: '自动审核转人工',
+      },
+      {
+        request: {
+          ...original,
+          policy: { reason: 'complete_approval_request' },
+          approvalPresentation: 'reviewer_handoff',
+        },
+        heading: '自动审核转人工',
+      },
+    ] as { request: Interaction['request']; heading: string }[]) {
+      await act(async () => render(request));
+      expect(host.querySelector('header strong')?.textContent).toBe(heading);
+      expect(host.querySelectorAll('header strong')).toHaveLength(1);
+    }
+  } finally {
+    await act(async () => root.unmount());
+    restore();
+    dom.window.close();
+    Object.assign(globalThis, previous);
+  }
+});
+
 test('child labels require the original Store, Session and Run and never display an identity as a name', () => {
   const child = approval('child', 'child');
   const owner = { storeId: 'store', sessionId: 'child', runId: 'child-run', title: '准确名称' };

@@ -35,7 +35,7 @@ export {
 export { createFileToolBehaviors } from './tools/files-approval';
 export { fileChangePreviewCounts } from './tools/files-diff';
 export type { FileMutationCapture } from './tools/files-tools';
-export { createFileTools } from './tools/files-tools';
+export { createFileTools, fileEditBatchTarget } from './tools/files-tools';
 export { withFullAccessFiles } from './tools/full-access-files';
 export { imageAssets } from './tools/images/processor';
 export { createImageFileReads } from './tools/images/reader';

@@ -65,6 +65,8 @@ export type NativeToolMessageFact = Pick<
 > & {
   messageId: string;
   executionId: string;
+  /** Store-settled member covered by a rejected batch, not its own approval. */
+  fileEditBatchRejectedMember?: true;
   /** Core-confirmed pre-dispatch freshness rejection; the original Execution remains failed. */
   decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
   /** Exact successful builtin Files read receipt: the requested file is absent. */

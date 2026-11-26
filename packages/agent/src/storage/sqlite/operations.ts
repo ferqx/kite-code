@@ -6,6 +6,7 @@ import { isImageObservation } from '../../execution/image-window';
 import { canonicalJson } from '../../json';
 import { bodyReference } from '../../model-body';
 import { recordedTokenUsage } from '../../token-usage';
+import { assertFileEditBatchMember, coveredFileEdit, fileEditBatchSeal } from '../file-edit-batch';
 import type {
   AcceptCommandInput,
   CancelCommandInput,
@@ -54,6 +55,7 @@ import {
 import {
   autoAuthorizationContext,
   resolveAutoAuthorization,
+  resolveShellAuthorization,
   resolveWorktreeAuthorization,
 } from './authorization-policy-evidence';
 import { executionAuthorizationObservation } from './authorization-review';
@@ -1009,6 +1011,31 @@ export class SqliteOperations {
             },
     };
   }
+  fileEditBatchRows(row: Row, phase: 'dispatch' | 'settlement') {
+    const seal = fileEditBatchSeal(parse(row.decision_source_json));
+    if (!seal) return;
+    if (row.id !== seal.leaderExecutionId)
+      throw new AgentError('file_edit_batch_member_not_dispatchable');
+    const modelRow = this.row('SELECT * FROM execution WHERE id=?', seal.modelExecutionId);
+    if (!modelRow || !row.run_id) throw new AgentError('file_edit_batch_binding_changed');
+    const model = this.execution(modelRow);
+    const leader = this.execution(row);
+    const members = seal.members.slice(1).map(({ callId }) => {
+      const selected = this.rows(
+        'SELECT * FROM execution WHERE session_id=? AND run_id=? AND step_id=? AND call_id=?',
+        leader.sessionId,
+        leader.runId,
+        leader.stepId,
+        callId,
+      );
+      if (selected.length !== 1) throw new AgentError('file_edit_batch_binding_changed');
+      const member = this.execution(selected[0]!);
+      assertFileEditBatchMember(leader, member, model, phase);
+      return member;
+    });
+    return { leader, members, model };
+  }
+
   execution(row: Row): ExecutionRecord {
     const accepted = this.row(
       "SELECT c.* FROM context_snapshot c JOIN session s ON s.id=c.session_id WHERE c.kind='result_ref' AND c.execution_id=? AND c.result_revision=? AND c.selection_id=s.context_selection_id AND COALESCE(json_extract(c.request_json,'$.diagnostic'),0)=0 AND COALESCE(json_extract(c.request_json,'$.pendingInput'),0)=0 ORDER BY c.seq LIMIT 1",
@@ -1292,6 +1319,11 @@ export class SqliteOperations {
         return resolveWorktreeAuthorization(
           this,
           args[0] as Parameters<Store['resolveWorktreeAuthorization']>[0],
+        );
+      case 'resolveShellAuthorization':
+        return resolveShellAuthorization(
+          this,
+          args[0] as Parameters<Store['resolveShellAuthorization']>[0],
         );
       case 'readExecutionEvidence':
         return readExecutionEvidence(
@@ -1860,6 +1892,48 @@ export class SqliteOperations {
         const row = this.row('SELECT * FROM run WHERE id=?', String(args[0]));
         return row ? this.runRecord(row) : null;
       }
+      case 'splitUndispatchedFileEditBatch':
+        return this.tx(() => {
+          const split = args[0] as Parameters<Store['splitUndispatchedFileEditBatch']>[0];
+          this.identity(split.expectedStoreId);
+          const leader = this.row('SELECT * FROM execution WHERE id=?', split.executionId);
+          if (
+            !leader ||
+            leader.state !== 'planned' ||
+            leader.dispatched !== 0n ||
+            leader.cancel_requested ||
+            leader.interaction_binding_json !== null ||
+            leader.origin_store_id !== split.expectedStoreId ||
+            String(leader.owner_generation) !== split.owner.generation
+          )
+            throw new AgentError('file_edit_batch_binding_changed');
+          this.owner(split.owner, String(leader.session_id));
+          this.active(split.owner, String(leader.origin_command_id), String(leader.run_id));
+          verifyHostControlReads(this, leader, split.expectedStoreId, split.controlReads);
+          const batch = this.fileEditBatchRows(leader, 'dispatch');
+          if (!batch || fileEditBatchSeal(batch.leader.decisionSource)?.digest !== split.digest)
+            throw new AgentError('file_edit_batch_binding_changed');
+          return [batch.leader, ...batch.members].map((execution) => {
+            // Keep the original model proof and call identity. The journal event
+            // retains the former exact group without carrying its approval forward.
+            const { fileEditBatch: retired, ...source } = execution.decisionSource as Record<
+              string,
+              Json
+            >;
+            this.run(
+              'UPDATE execution SET decision_source_json=? WHERE id=?',
+              canonicalJson(source),
+              execution.id,
+            );
+            this.event(
+              execution.sessionId,
+              execution.id,
+              'execution.file_edit_batch_split',
+              retired,
+            );
+            return this.execution(this.row('SELECT * FROM execution WHERE id=?', execution.id)!);
+          });
+        });
       case 'planExecution':
         return this.tx(() => {
           this.identity(input.expectedStoreId);
@@ -2171,6 +2245,7 @@ export class SqliteOperations {
           verifyHostControlDispatch(this, execution, input);
           verifyAuthorizationCheckDispatch(this, input);
           assertDispatchReadSet(this, execution, input);
+          this.fileEditBatchRows(execution, 'dispatch');
           this.run(
             "UPDATE execution SET state='dispatching',dispatched=1,dispatch_authorization_json=? WHERE id=?",
             canonicalJson({
@@ -2466,6 +2541,23 @@ export class SqliteOperations {
             );
           if (BigInt(execution.result_revision!) >= 9223372036854775807n)
             throw new AgentError('sequence_exhausted');
+          const fileEditBatch = this.fileEditBatchRows(execution, 'settlement');
+          const coveredEdits = fileEditBatch?.members.map((member) => {
+            if (
+              status !== 'succeeded' &&
+              status !== 'failed' &&
+              status !== 'cancelled' &&
+              status !== 'outcome_unknown'
+            )
+              throw new AgentError('file_edit_batch_binding_changed');
+            return {
+              member,
+              result: coveredFileEdit(fileEditBatch.leader, member, fileEditBatch.model, {
+                status,
+                result,
+              }),
+            };
+          });
           finalizeSessionExecutionRoot(this, execution, { owner: input.owner, status, result });
           this.run(
             'UPDATE execution SET state=?,result_json=?,result_revision=result_revision+1 WHERE id=?',
@@ -2546,6 +2638,32 @@ export class SqliteOperations {
             'UPDATE execution SET completed_cursor=(SELECT last_change_cursor FROM storage_meta WHERE singleton=1) WHERE id=?',
             input.executionId,
           );
+          for (const { member, result } of coveredEdits ?? []) {
+            if (BigInt(member.resultRevision) >= 9223372036854775807n)
+              throw new AgentError('sequence_exhausted');
+            this.run(
+              'UPDATE execution SET state=?,result_json=?,result_revision=result_revision+1 WHERE id=?',
+              status,
+              canonicalJson(result),
+              member.id,
+            );
+            this.appendMessage(
+              member.sessionId,
+              member.runId,
+              {
+                role: 'tool',
+                content: result.content,
+                toolCallId: member.callId,
+                sourceIds: [member.id],
+              },
+              'tool',
+            );
+            this.event(member.sessionId, member.id, 'execution.finished');
+            this.run(
+              'UPDATE execution SET completed_cursor=(SELECT last_change_cursor FROM storage_meta WHERE singleton=1) WHERE id=?',
+              member.id,
+            );
+          }
           registerJobReport(this, input.executionId);
           const control =
             result &&

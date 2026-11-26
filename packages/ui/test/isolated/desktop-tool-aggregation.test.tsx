@@ -2109,3 +2109,138 @@ test('simple Trace summaries group by first occurrence, not command or remote co
     expect(message.shell?.jobStatus).toBe('running');
   }
 });
+
+test('a human rejection before dispatch is one neutral note for ordinary Search and MCP', () => {
+  for (const toolName of ['web_search', 'mcp_tool']) {
+    const denied: Message = {
+      ...tool('original-rejection', 'failed'),
+      toolName,
+      target: undefined,
+      text: 'approval_denied',
+      dispatchCommitted: false,
+      approval: { state: 'rejected', source: 'user', interactionId: 'persisted-original-card' },
+    };
+    for (const body of [
+      <ToolRow key="row" message={denied} />,
+      <ToolActivity
+        key="trace"
+        messages={[denied]}
+        onToggle={() => {}}
+        renderChildren={() => null}
+        expanded
+        inTrace
+        directTraceDetails
+      />,
+    ]) {
+      const dom = new JSDOM(renderToStaticMarkup(body));
+      try {
+        const d = dom.window.document;
+        expect(d.querySelector('[data-status="error"], [aria-label="工具异常详情"]')).toBeNull();
+        expect(d.querySelectorAll('.tool-approval')).toHaveLength(1);
+        expect(d.querySelector('.tool-approval')?.textContent).toBe('人工审批已拒绝');
+        expect(d.body.textContent).not.toContain('approval_denied');
+      } finally {
+        dom.window.close();
+      }
+    }
+  }
+});
+
+test('a cold completed edit batch exposes one neutral denial after both disclosures open', async () => {
+  const leader: Message = {
+    ...tool('history-batch-leader', 'failed'),
+    toolName: 'edit_file',
+    target: 'shared.ts',
+    presentationGroupId: 'history-batch',
+    text: 'approval_denied',
+    dispatchCommitted: false,
+    approval: { state: 'rejected', source: 'user', interactionId: 'original-batch-card' },
+  };
+  const companion: Message = {
+    ...tool('history-batch-companion', 'failed'),
+    toolName: 'edit_file',
+    target: 'shared.ts',
+    presentationGroupId: leader.presentationGroupId,
+    status: 'not_executed',
+    fileEditBatchRejectedMember: true,
+  };
+  await withConversation(
+    async ({ host, render, click }) => {
+      await render([
+        leader,
+        companion,
+        {
+          id: 'history-batch-final',
+          role: 'assistant',
+          turnId: 'run',
+          settled: true,
+          finalReply: true,
+          text: 'The edit was not applied.',
+        },
+      ]);
+      const turn = host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
+      expect(turn.getAttribute('aria-expanded')).toBe('false');
+      expect(host.querySelector('.conversation-trace-trigger')).toBeNull();
+      await click(turn);
+      const trace = host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
+      expect(trace.getAttribute('aria-expanded')).toBe('false');
+      await click(trace);
+      expect([...host.querySelectorAll('.tool-approval')].map((node) => node.textContent)).toEqual([
+        '人工审批已拒绝',
+      ]);
+      expect(host.querySelector('[data-status="error"], [aria-label="工具异常详情"]')).toBeNull();
+      expect(host.textContent).not.toMatch(/未执行|approval_denied/);
+    },
+    { traceTurns: true, turnActivity: undefined, renderToolActivity: undefined },
+  );
+});
+
+test('unverified, dispatched, unknown and automatic tool failures keep independent diagnostics', () => {
+  const base: Message = {
+    ...tool('original-diagnostic', 'failed'),
+    toolName: 'mcp_tool',
+    target: undefined,
+    text: 'approval_denied',
+    dispatchCommitted: false,
+    approval: { state: 'rejected', source: 'user', interactionId: 'saved-original' },
+  };
+  const cases: { patch: Partial<Message>; text: string; label?: string }[] = [
+    { patch: { dispatchCommitted: undefined }, text: 'approval_denied' },
+    { patch: { approval: undefined }, text: 'approval_denied' },
+    { patch: { text: 'approval_denied: OWNER_DIAGNOSTIC' }, text: 'OWNER_DIAGNOSTIC' },
+    { patch: { dispatchCommitted: true, text: 'REMOTE_FAILURE' }, text: 'REMOTE_FAILURE' },
+    {
+      patch: { status: 'unknown', text: 'RECOVERY_UNCONFIRMED' },
+      text: 'RECOVERY_UNCONFIRMED',
+      label: '结果未知',
+    },
+    {
+      patch: {
+        approval: { state: 'rejected', source: 'auto', interactionId: 'review-check' },
+        text: 'AUTO_REVIEW_FAILURE',
+      },
+      text: 'AUTO_REVIEW_FAILURE',
+    },
+  ];
+  for (const { patch, text, label } of cases) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <ToolActivity
+          messages={[{ ...base, ...patch }]}
+          onToggle={() => {}}
+          renderChildren={() => null}
+          expanded
+          inTrace
+          directTraceDetails
+        />,
+      ),
+    );
+    try {
+      const d = dom.window.document;
+      expect(d.querySelector('[aria-label="工具异常详情"]')?.textContent).toContain(text);
+      if (label) expect(d.querySelector('article')?.getAttribute('aria-label')).toContain(label);
+    } finally {
+      dom.window.close();
+    }
+  }
+});

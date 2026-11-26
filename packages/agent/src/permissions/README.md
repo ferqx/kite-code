@@ -138,7 +138,7 @@ Planning 默认宿主调用 `createBusinessPermissionPolicy`，并由 Planning o
 
 当前回归沿[解析](../../test/isolated/permissions/shell-command-policy.test.ts)核 bundled rg 的安全查询、选项值、hooks 与解压器副作用；[Service Shell](../../../../apps/service/test/isolated/shell-configuration.test.ts)和[检索集成](../../../../apps/service/test/isolated/shell-search-configuration.test.ts)核只读任务的复合查询进入继承的三模式、普通平台保护及新审核超时不派发。该组显式注入的自定义审核器仍按旧合同接收任务上下文并可拒绝实际写入，不代表新默认风险合同核任务授权；后者由上文 risk 回归与[真实模型入口](../../../../tests/e2e/live/model/README.md#审批策略与原生-shell-执行)分别验证。[同名模型](../../../../apps/service/test/isolated/shell-model-identity.test.ts)核能力身份隔离；[指导输入](../../../../apps/service/test/isolated/child-readonly-guidance.test.ts)核角色的实际模型 Source 与冻结。下段2026-11-03早先回归中的角色命令硬拒结果属于替换前行为，不能证明当前角色禁写。[前台](../../test/isolated/tools/shell/foreground.test.ts)的期限与取消语义保持。受控模型及本机效果不扩为真实模型判断、客户端界面或其他平台原生资格。
 
-Windows Git Bash 的字面 `ls` 查询使用当前文件授权范围选中的 Git Bash 副本内的绝对 `ls.exe` 路径。该副本及命令的摘要由运行时清单固定，并在派发前完整校验。相同查询规则仍通过 [shell-search](shell-search.ts) 在 Service 权限判定和 Job 派发中复用。
+Windows 使用系统原生安装的 Git Bash，不复制私有运行时。实际 Job 以当前 Windows 用户身份执行，不能将 Shell 范围或只读识别当作操作系统隔离；非完全模式按原生用户进程路径确认。具体范围见下文 Windows 当前实现。
 
 同日当前角色继承差量在上述 macOS／Bun 环境，以 `bun test --parallel=1 --max-concurrency=1` 逐个绝对路径执行 Service Shell、同名模型、指导输入、[默认角色](../../../../apps/service/test/isolated/default-task-roles.test.ts)及[Task 分类](../../test/isolated/permissions/task-request.test.ts)五份整文件，51项／830断言通过；Windows 专属检索整文件在本机保留1项 skip，不据此宣称 Windows 已复验。根 typecheck 的8个 workspace、边界和测试归属检查通过。指导测试中的冷读取只隔离 host Source 恢复分支，现有完整 child 角色封套恢复限制未在本轮修复。
 
@@ -166,6 +166,8 @@ Windows 桌面 PowerShell 使用[所选安装的 AST 解析器](powershell-comma
 
 `accept_edits` 的受限 PowerShell 在可信父 Tool 只调度同一附着 `shell.command`、且当前策略包含该 Job 时，将默认审批交给 Job。父 Tool 先通过自身能力与硬限制核验，Job 原批准及派发分别核当前策略和原回执。与其他权限合成时，各方继续核各自要求。Windows x64／Bun 1.4.4 源码 Service 回归使用本机真实受限进程及受控模型，覆盖同命令两轮各一张 Job 卡、首轮一次效果、次轮拒绝零派发，以及两个 Windows 后端的 Auto。 [默认策略](index.ts) · [可信分类](shell.ts) · [原生回归](../../../../apps/service/test/isolated/windows-shell-auto.test.ts)
 
+macOS 正式宿主的请求批准模式保留父 Tool 的精确人工批准，在可信 Shell 行为与 Store 双重核验后，仅对其准确附着的 Job 共用默认人工决定。Job 核自己的真实定义、当前模式和批准范围，最后仍检查此次父批准或未撤销的精确命令授权；不继承独立自定义审批。父 Tool 的期限和生命周期仍属于授权摘要。与受限 PowerShell 由实际 Job 拥有批准的既有选择不同，不改变 Windows、Auto 或 Full。实现与限制见 [Shell owner](../tools/shell.README.md)。
+
 ## Git Worktree 的准确权限
 
 `git.worktree@1` 仍是混合读写工具，不加入整个 hostReadOnlyTool 白名单；只有真实 `builtin.shell` 绑定的合法 list 和准确匹配固定 worker list 命令可返回 safeRead。prepare 按原变更 action 的保守效果执行；create/remove 不因内层准备只读而取得分析角色或 Planning 权限。[Service](../../../../apps/service/src/permission-configuration.ts)按真实装配对只读子任务拒绝 Worktree 变更，原普通 Shell 的任务指引和三模式保持。
@@ -174,7 +176,7 @@ Windows 桌面 PowerShell 使用[所选安装的 AST 解析器](powershell-comma
 
 固定 worker 的实际文件/网络范围取原 Job 申请与已接纳证明的交集，network 恒为 none；不会因 Full 把默认 workspace_write 扩为外部写入。Auto 下仅准确可信 `builtin.shell/git.worktree@1` Tool 使用 `autoReview:none`，不创建自动审核或人工审批；内部 Job 仍须证明来自该原 Tool，不能仅因命令能解析为 worker 就免审。资产缺失或变化局部拒绝，不阻断普通 Session。具体 [Worktree 边界](../tools/git-worktree/README.md)和[安全回归](../../test/isolated/tools/git-worktree/launch-security.test.ts)保留 legacy list-only、自定义 Shell 和平台限制。
 
-手动模式 Worktree 的一次业务批准精确覆盖原 Tool 两个冻结内部步骤，正常创建／删除各一张卡；Auto 的两个步骤只继承准确原 Tool 已封存的免审来源，零 generic check 和人工卡。[决策封存](worktree-authorization.ts)仅绑定默认策略与受验证的父子／Planning 组合，额外自定义人工条件改写决策后不能沿旧封存复用；它不是秘密签名或授权本体。[SQLite 边界](../storage/sqlite/worktree-authorization.ts)核真实 builtin.shell 注册、原 owner 与 executable 记录、完整步骤 input/ref/token、范围和期限；mutation 从原 prepare 的完整连续零丢块输出核其原计划。最终派发重新核原 interaction/check/grant 或真实 Auto 免审来源、控制上下文及冻结步骤，结构化范围的 epoch 撤销、取消和 unknown 处理保持。没有把任意 Job 直接标为 allowed，也没有改变普通 Shell 的手动分层合同。
+手动模式 Worktree 的一次业务批准精确覆盖原 Tool 两个冻结内部步骤，正常创建／删除各一张卡；Auto 的两个步骤只继承准确原 Tool 已封存的免审来源，零 generic check 和人工卡。[决策封存](worktree-authorization.ts)仅绑定默认策略与受验证的父子／Planning 组合，额外自定义人工条件改写决策后不能沿旧封存复用；它不是秘密签名或授权本体。[SQLite 边界](../storage/sqlite/worktree-authorization.ts)核真实 builtin.shell 注册、原 owner 与 executable 记录、完整步骤 input/ref/token、范围和期限；mutation 从原 prepare 的完整连续零丢块输出核其原计划。最终派发重新核原 interaction/check/grant 或真实 Auto 免审来源、控制上下文及冻结步骤，结构化范围的 epoch 撤销、取消和 unknown 处理保持。没有把任意 Job 直接标为 allowed，也此业务规则不适用于普通 Shell。
 
 复用不扩展到其他业务 Execution、兄弟 Agent 或独立 Shell。原已接纳效果的恢复仍只观察原 ref，合法原 owner resume 才可逐字续接；首次未获批准或独立人工上限继续按原路径处理。对应[真实 Runtime/SQLite 回归](../../test/isolated/execution/worktree-authorization.test.ts)与[Service 原生 Git 装配](../../../../apps/service/test/isolated/git-worktree-permissions.test.ts)分别验证封存、防伪、最终派发竞争、手动业务卡及 Auto 零审核。免审批不代表用户已授权删除；退出只做客户端来源导航。
 

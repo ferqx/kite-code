@@ -35,11 +35,16 @@ export type NativeAnswerIntent = {
 export type NativeAnswerRecord = {
   intent: NativeAnswerIntent;
   phase: 'submitting' | 'unknown' | 'accepted' | 'failed';
+  verifiedRejection?: true;
 };
 export interface NativeAnswerData {
   answers(): NativeAnswerRecord[];
   beginAnswer(record: NativeAnswerRecord): { created: boolean; value: NativeAnswerRecord };
-  finishAnswer(commandId: string, phase: NativeAnswerRecord['phase']): NativeAnswerRecord;
+  finishAnswer(
+    commandId: string,
+    phase: NativeAnswerRecord['phase'],
+    verifiedRejection?: boolean,
+  ): NativeAnswerRecord;
 }
 const id = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const hash = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -64,7 +69,10 @@ export const answerRequestDigest = (interactionId: string, request: AnswerIntera
     answer: request.answer,
   });
 export function validateAnswerRecord(raw: unknown): NativeAnswerRecord {
-  closed(raw, ['intent', 'phase']);
+  const proof = !!raw && typeof raw === 'object' && Object.hasOwn(raw, 'verifiedRejection');
+  closed(raw, ['intent', 'phase', ...(proof ? ['verifiedRejection'] : [])]);
+  if (proof && (raw.phase !== 'failed' || raw.verifiedRejection !== true))
+    throw Error('answer_storage_unavailable');
   closed(raw.intent, [
     'scope',
     'subjectId',
@@ -190,6 +198,20 @@ export function assertAnswerRecords(records: readonly NativeAnswerRecord[]) {
   }
 }
 /** Local intents are durable evidence only. This class deliberately exposes no cold POST method. */
+// Only a matching Service command may turn a rejected answer into durable terminal proof.
+export function advanceAnswerRecord(
+  old: NativeAnswerRecord,
+  phase: NativeAnswerRecord['phase'],
+  verifiedRejection = false,
+): NativeAnswerRecord {
+  if (old.phase === 'accepted' || old.verifiedRejection) return old;
+  return validateAnswerRecord({
+    ...old,
+    phase,
+    ...(phase === 'failed' && verifiedRejection ? { verifiedRejection: true } : {}),
+  });
+}
+
 export class NativeAnswerJournal {
   private readonly client: AgentClient;
   private readonly data: NativeAnswerData;
@@ -327,6 +349,7 @@ export class NativeAnswerJournal {
         : submission.phase === 'failed'
           ? 'failed'
           : 'unknown',
+      submission.phase === 'failed' && !!submission.receipt,
     );
   }
   async lookup(commandId: string): Promise<Command> {
@@ -354,7 +377,7 @@ export class NativeAnswerJournal {
       );
       if (command.subjectId !== intent.subjectId || command.requestDigest !== intent.requestDigest)
         throw Error('answer_receipt_unavailable');
-      this.data.finishAnswer(commandId, phase);
+      this.data.finishAnswer(commandId, phase, phase === 'failed');
       return command;
     } catch (error) {
       this.data.finishAnswer(commandId, 'unknown');

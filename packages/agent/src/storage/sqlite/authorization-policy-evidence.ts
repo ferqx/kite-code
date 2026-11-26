@@ -3,6 +3,7 @@ import type { PermissionDecision } from '../../extensions';
 import { canonicalJson } from '../../json';
 import { dispatchScopeLeaves } from '../../permissions/dispatch-scope';
 import { isAutoWorktreeDecision } from '../../permissions/worktree-authorization';
+import { shellOperationKey } from '../../shell-input';
 import type { AutoAuthorizationEvidence, DispatchInput, Store } from '../port';
 import { AgentError, type ExecutionAuthorizationObservation, type Json } from '../types';
 import {
@@ -491,6 +492,149 @@ function sameApprovedEffect(db: SqliteOperations, row: Row, original: Row, check
   );
 }
 
+function stockShellLeaf(snapshot: Json, execution: Row) {
+  let tree = obj(snapshot);
+  if (tree.namespace === 'builtin.business.permissions') {
+    const data = obj(tree.data);
+    const gate = obj(data.gate);
+    if (tree.version !== '1' || gate.namespace !== 'builtin.planning' || gate.version !== '1')
+      throw new AgentError('authorization_policy_unverifiable');
+    const state = obj(obj(gate.data).planning).status;
+    if (state !== 'disabled' && state !== 'approved')
+      throw new AgentError('authorization_policy_unverifiable');
+    tree = obj(data.current);
+  }
+  const data = obj(tree.data);
+  const capability = obj(data.capability);
+  const scope = obj(capability.executionScope);
+  if (
+    tree.namespace !== 'builtin.permissions' ||
+    tree.version !== '1' ||
+    data.mode !== 'accept_edits' ||
+    data.workspaceTrust !== true ||
+    capability.hardAllowed !== true ||
+    capability.windowsNativeUserProcess ||
+    capability.worktreeAuthorization ||
+    capability.kind !== execution.kind ||
+    capability.definitionId !== execution.adapter_id ||
+    capability.definitionVersion !== execution.definition_version ||
+    typeof capability.commandDigest !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(capability.commandDigest) ||
+    typeof capability.autoReviewKey !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(capability.autoReviewKey) ||
+    !['workspace_write', 'full_access'].includes(String(scope.filesystem)) ||
+    !['none', 'internet'].includes(String(scope.network)) ||
+    (scope.filesystem !== 'full_access' && scope.network !== 'internet')
+  )
+    throw new AgentError('authorization_policy_unverifiable');
+  return capability;
+}
+
+/** Only the attached Job of this exact human-confirmed Mac Shell Tool may consume this proof. */
+function shellAuthorizationBoundary(
+  db: SqliteOperations,
+  target: Row,
+  decision: PermissionDecision,
+  proof: Json,
+) {
+  const jobProof = obj(proof);
+  const parent = target.parent_execution_id
+    ? db.row('SELECT * FROM execution WHERE id=?', target.parent_execution_id)
+    : undefined;
+  if (
+    !parent?.dispatched ||
+    parent.cancel_requested ||
+    !['dispatching', 'running', 'succeeded'].includes(String(parent.state)) ||
+    parent.run_id === null ||
+    (target.run_id !== null && target.run_id !== parent.run_id) ||
+    target.root_session_id !== parent.root_session_id ||
+    !sameScope(target, parent) ||
+    parent.definition_version !== '1' ||
+    !['shell.execute', 'shell.launch'].includes(String(parent.adapter_id)) ||
+    target.adapter_id !== 'shell.command' ||
+    target.definition_version !== '1' ||
+    !target.cancel_with_parent ||
+    !trustedParentBridge(db, target, parent, proof) ||
+    jobProof.childInputDigest !== hash(JSON.parse(String(target.intent_json))) ||
+    db.row(
+      "SELECT id FROM execution WHERE kind='job' AND parent_execution_id=? AND id<>? LIMIT 1",
+      parent.id!,
+      target.id!,
+    ) ||
+    !parent.dispatch_authorization_json ||
+    !decision.snapshot ||
+    !decision.approval ||
+    decision.allowed ||
+    decision.reason !== 'approval_required' ||
+    decision.check
+  )
+    throw new AgentError('authorization_policy_unverifiable');
+  const originalJob = db.row('SELECT * FROM command WHERE id=?', target.origin_command_id!);
+  if (
+    originalJob?.kind !== 'operation.job' ||
+    originalJob.extension_id !== 'builtin.shell' ||
+    originalJob.scope_kind !== 'session' ||
+    originalJob.scope_id !== target.session_id ||
+    originalJob.cancelled ||
+    originalJob.subject_id !==
+      db.row('SELECT subject_id FROM command WHERE id=?', parent.origin_command_id!)?.subject_id
+  )
+    throw new AgentError('authorization_policy_unverifiable');
+  const operation = parsed(originalJob.request_json);
+  const operationKey = shellOperationKey(parsed(parent.intent_json).key ?? null, String(parent.id));
+  if (
+    operation.kind !== 'operation.job' ||
+    operation.parentExecutionId !== parent.id ||
+    operation.definitionId !== target.adapter_id ||
+    operation.definitionVersion !== target.definition_version ||
+    operation.extensionId !== 'builtin.shell' ||
+    operation.cancellation !== 'attached' ||
+    operation.operationKey !== operationKey ||
+    originalJob.operation_key !== operationKey ||
+    canonicalJson(operation.input!) !== target.intent_json
+  )
+    throw new AgentError('authorization_policy_unverifiable');
+
+  const accepted = parsed(parent.dispatch_authorization_json);
+  if (
+    accepted.allowed !== true ||
+    (!accepted.interactionId && !accepted.grant) ||
+    accepted.policyEvidenceId ||
+    accepted.checkExecutionId ||
+    accepted.executionConfirmation ||
+    accepted.inputDigest !== jobProof.parentInputDigest ||
+    canonicalJson(accepted.controlReads ?? null) !==
+      canonicalJson((decision.controlReads as unknown as Json) ?? null)
+  )
+    throw new AgentError('authorization_policy_unverifiable');
+  const childSnapshot = decision.snapshot as unknown as Json;
+  const capability = stockShellLeaf(accepted.snapshot!, parent);
+  stockShellLeaf(childSnapshot, target);
+  if (
+    canonicalJson(bridgePolicy(accepted.snapshot!)) !== canonicalJson(bridgePolicy(childSnapshot))
+  )
+    throw new AgentError('authorization_policy_unverifiable');
+  if (accepted.grant) {
+    const offer = obj(obj(accepted.grant).offer);
+    if (
+      offer.contractId !== 'builtin.shell.exact-command' ||
+      obj(offer.scope).commandDigest !== capability.commandDigest
+    )
+      throw new AgentError('authorization_policy_unverifiable');
+  }
+  return { parent, accepted };
+}
+
+function verifyShellSource(db: SqliteOperations, parent: Row, accepted: Record<string, Json>) {
+  const input = {
+    expectedStoreId: String(parent.origin_store_id),
+    executionId: String(parent.id),
+    authorization: accepted,
+  } as unknown as DispatchInput;
+  verifyInteractionDispatch(db, parent, input);
+  verifyPermissionGrantDispatch(db, input);
+}
+
 function evidence(
   db: SqliteOperations,
   id: string,
@@ -502,7 +646,19 @@ function evidence(
     throw new AgentError('authorization_policy_changed');
   const source = obj(payload.source);
   let materialReviewed = false;
-  if (source.kind === 'worktree') {
+  if (source.kind === 'shell') {
+    const decision = obj(payload.shellDecision) as unknown as PermissionDecision;
+    const boundary = shellAuthorizationBoundary(db, target, decision, payload.parentProof!);
+    if (
+      payload.reason !== 'parent_review' ||
+      source.targetExecutionId !== boundary.parent.id ||
+      payload.policyRevision !== decision.revision ||
+      !sameWorktreeJson(payload.snapshot, decision.snapshot) ||
+      !sameWorktreeJson(payload.controlReads, decision.controlReads)
+    )
+      throw new AgentError('authorization_policy_changed');
+    verifyShellSource(db, boundary.parent, boundary.accepted);
+  } else if (source.kind === 'worktree') {
     const decision = obj(payload.worktreeDecision) as unknown as PermissionDecision;
     const boundary = worktreeAuthorizationBoundary(db, target, decision);
     if (
@@ -747,57 +903,102 @@ export function resolveWorktreeAuthorization(
         planDigest: boundary.planDigest,
       },
     };
-    const key = `policy/${hash(payload)}`;
-    let command = db.row(
-      "SELECT * FROM command WHERE kind='authorization.policy' AND session_id=? AND operation_key=?",
+    return persistParentAuthorization(db, target, payload, input.decision);
+  });
+}
+
+export function resolveShellAuthorization(
+  db: SqliteOperations,
+  input: Parameters<Store['resolveShellAuthorization']>[0],
+): AutoAuthorizationEvidence | null {
+  return db.tx(() => {
+    const target = currentTarget(db, input);
+    let boundary: ReturnType<typeof shellAuthorizationBoundary>;
+    try {
+      boundary = shellAuthorizationBoundary(db, target, input.decision, input.proof);
+    } catch (error) {
+      if (error instanceof AgentError && error.code === 'authorization_policy_unverifiable')
+        return null;
+      throw error;
+    }
+    // A cleared grant or changed original human decision cannot turn into Job authority.
+    verifyShellSource(db, boundary.parent, boundary.accepted);
+    const payload: Json = {
+      targetExecutionId: String(target.id),
+      inputDigest: hash(JSON.parse(String(target.intent_json))),
+      sourceDigest: hash(JSON.parse(String(target.decision_source_json))),
+      ownerGeneration: String(target.owner_generation),
+      policyRevision: input.decision.revision,
+      operationKey: obj(input.proof).operationDigest!,
+      autoContext: autoAuthorizationContext(db, target),
+      shellDecision: input.decision as unknown as Json,
+      parentProof: input.proof,
+      controlReads: (input.decision.controlReads as unknown as Json) ?? null,
+      snapshot: input.decision.snapshot as unknown as Json,
+      requestedSnapshot: input.decision.snapshot as unknown as Json,
+      reason: 'parent_review',
+      source: { kind: 'shell', targetExecutionId: String(boundary.parent.id) },
+    };
+    return persistParentAuthorization(db, target, payload, input.decision);
+  });
+}
+
+function persistParentAuthorization(
+  db: SqliteOperations,
+  target: Row,
+  payload: Json,
+  decision: PermissionDecision,
+): AutoAuthorizationEvidence {
+  const key = `policy/${hash(payload)}`;
+  let command = db.row(
+    "SELECT * FROM command WHERE kind='authorization.policy' AND session_id=? AND operation_key=?",
+    target.session_id!,
+    key,
+  );
+  if (!command) {
+    const id = randomUUID(),
+      request: Json = {
+        kind: 'authorization.policy',
+        parentExecutionId: String(target.id),
+        input: payload,
+      };
+    const origin = db.row('SELECT * FROM command WHERE id=?', target.origin_command_id!)!;
+    db.allocateSessionSequence(String(target.session_id));
+    const seq = db.row('SELECT next_seq FROM session WHERE id=?', target.session_id!)!.next_seq!;
+    db.run(
+      "INSERT INTO command(id,session_id,seq,kind,subject_id,request_digest,request_json,status,receipt_json,origin_store_id,root_work_command_id,root_work_seq,extension_id,scope_kind,scope_id,operation_key) VALUES(?,?,?,'authorization.policy',?,?,?,'applied',?,?,?,?,?,'execution',?,?)",
+      id,
       target.session_id!,
+      seq,
+      origin.subject_id!,
+      hash(request),
+      canonicalJson(request),
+      canonicalJson({ policyEvidenceId: id }),
+      target.origin_store_id!,
+      target.root_work_command_id!,
+      target.root_work_seq!,
+      '__authorization_policy__',
+      target.id!,
       key,
     );
-    if (!command) {
-      const id = randomUUID(),
-        request: Json = {
-          kind: 'authorization.policy',
-          parentExecutionId: String(target.id),
-          input: payload,
-        };
-      const origin = db.row('SELECT * FROM command WHERE id=?', target.origin_command_id!)!;
-      db.allocateSessionSequence(String(target.session_id));
-      const seq = db.row('SELECT next_seq FROM session WHERE id=?', target.session_id!)!.next_seq!;
-      db.run(
-        "INSERT INTO command(id,session_id,seq,kind,subject_id,request_digest,request_json,status,receipt_json,origin_store_id,root_work_command_id,root_work_seq,extension_id,scope_kind,scope_id,operation_key) VALUES(?,?,?,'authorization.policy',?,?,?,'applied',?,?,?,?,?,'execution',?,?)",
-        id,
-        target.session_id!,
-        seq,
-        origin.subject_id!,
-        hash(request),
-        canonicalJson(request),
-        canonicalJson({ policyEvidenceId: id }),
-        target.origin_store_id!,
-        target.root_work_command_id!,
-        target.root_work_seq!,
-        '__authorization_policy__',
-        target.id!,
-        key,
-      );
-      db.event(String(target.session_id), String(target.id), 'authorization.policy', {
-        targetExecutionId: String(target.id),
-        policyEvidenceId: id,
-        reason: 'parent_review',
-        source: obj(payload).source!,
-        requestedScope:
-          (publicScope(input.decision.snapshot as unknown as Json) as unknown as Json) ?? null,
-        effectiveScope:
-          (publicScope(input.decision.snapshot as unknown as Json) as unknown as Json) ?? null,
-      });
-      command = db.row('SELECT * FROM command WHERE id=?', id)!;
-    }
-    evidence(db, String(command.id));
-    return {
-      policyEvidenceId: String(command.id),
+    db.event(String(target.session_id), String(target.id), 'authorization.policy', {
+      targetExecutionId: String(target.id),
+      policyEvidenceId: id,
       reason: 'parent_review',
-      snapshot: input.decision.snapshot,
-    };
-  });
+      source: obj(payload).source!,
+      requestedScope:
+        (publicScope(decision.snapshot as unknown as Json) as unknown as Json) ?? null,
+      effectiveScope:
+        (publicScope(decision.snapshot as unknown as Json) as unknown as Json) ?? null,
+    });
+    command = db.row('SELECT * FROM command WHERE id=?', id)!;
+  }
+  evidence(db, String(command.id));
+  return {
+    policyEvidenceId: String(command.id),
+    reason: 'parent_review',
+    snapshot: decision.snapshot,
+  };
 }
 
 export function resolveAutoAuthorization(
@@ -1227,6 +1428,10 @@ export function authorizationPolicyObservation(
               checkExecutionId = origin.id;
           }
         }
+        break;
+      }
+      if (source.kind === 'shell') {
+        sourceExecutionId = String(source.targetExecutionId);
         break;
       }
       if (source.kind === 'grant') {

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type {
+  ActionContext,
   AuthorizationRequest,
   PermissionDecision,
   ToolContext,
@@ -20,6 +21,7 @@ import {
   createFileReadResult,
   createFileTools,
   createMissingFileReadResult,
+  fileEditBatchTarget,
   fileFailureAdvice,
 } from './files-tools';
 
@@ -397,8 +399,64 @@ export function withFullAccessFiles(options: {
     };
   }
   return {
+    async fileEditBatchTarget(
+      request: AuthorizationRequest,
+      context: ActionContext,
+      batch?: readonly import('../file-edit-batch-plan').FileEditBatchInput[],
+    ) {
+      const selected = await prepare(request, request.input);
+      if (!selected) return undefined;
+      const native = createWorkspaceFiles({ root: selected.anchor, strictReads: true });
+      try {
+        const adapter = new Proxy(native, {
+          get(source, property, receiver) {
+            if (property === 'relativePath')
+              return (path: string) => {
+                if (path !== selected.originalPath && path !== selected.path)
+                  throw new AgentError('file_path_invalid');
+                return selected.relativePath;
+              };
+            return Reflect.get(source, property, receiver);
+          },
+        });
+        return await fileEditBatchTarget(request.input, context, adapter, selected.anchor, batch);
+      } finally {
+        await native.close();
+      }
+    },
     prepareRead,
     describeReadRequest,
+    async openExternalGrantLocation(request: AuthorizationRequest) {
+      if (!(await outside(request, request.input))) return null;
+      const before = await readScopeIdentity(request);
+      const selected = await prepare(request, request.input);
+      // A reusable grant requires the existing direct parent, not an ancestor
+      // that a one-time create may later populate with missing directories.
+      if (
+        !selected ||
+        selected.anchor !== dirname(selected.path) ||
+        !selected.binding.parent ||
+        before !== (await readScopeIdentity(request))
+      )
+        return null;
+      const { device, inode } = selected.binding.parent;
+      const files = createWorkspaceFiles({
+        root: selected.anchor,
+        expectedRootIdentity: { dev: device, ino: inode },
+        strictReads: true,
+      });
+      try {
+        request.signal.throwIfAborted();
+        return {
+          root: selected.anchor,
+          files,
+          externalWorkspaceDigest: createHash('sha256').update(before).digest('hex'),
+        };
+      } catch (error) {
+        await files.close();
+        throw error;
+      }
+    },
     async describeRequest(
       request: AuthorizationRequest,
       _policy?: Pick<PermissionPolicySnapshot, 'mode'>,
@@ -536,6 +594,19 @@ export function withFullAccessFiles(options: {
                         if (property === 'edit')
                           return async (value: Parameters<WorkspaceFiles['edit']>[0]) =>
                             absolute(await native.edit({ ...value, path: selected.relativePath }));
+                        if (property === 'editBatch') {
+                          const editBatch = native.editBatch;
+                          return (
+                            editBatch &&
+                            (async (value: Parameters<typeof editBatch>[0]) =>
+                              absolute(
+                                await editBatch.call(native, {
+                                  ...value,
+                                  path: selected.relativePath,
+                                }),
+                              ))
+                          );
+                        }
                         throw new AgentError('file_operation_unavailable');
                       },
                     });

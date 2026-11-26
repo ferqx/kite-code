@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import type { AuthorizationRequest, Json, ToolDefinition } from '../extensions';
 import {
   type CapabilityBinding,
@@ -8,12 +9,16 @@ import {
 import type { TrustedToolBehavior } from '../tool-behavior';
 import type { WorkspaceFiles } from './files';
 
-/** Ordinary workspace locations only. Private adapters retain their own narrower contracts. */
+/** Exact ordinary file locations only. Private adapters keep their own contracts. */
 export function createFileToolBehaviors(options: {
   readonly tools: readonly ToolDefinition[];
-  readonly readFiles: (
-    request: AuthorizationRequest,
-  ) => Promise<{ workspaceId: string; root: string; files: WorkspaceFiles }>;
+  readonly fileEditBatchTarget?: TrustedToolBehavior['fileEditBatchTarget'];
+  readonly readFiles: (request: AuthorizationRequest) => Promise<{
+    workspaceId: string;
+    root: string;
+    files: WorkspaceFiles;
+    externalWorkspaceDigest?: string;
+  }>;
 }): TrustedToolBehavior[] {
   const definitions = options.tools.filter(
     (tool) =>
@@ -34,6 +39,11 @@ export function createFileToolBehaviors(options: {
       definitionVersion: definition.version,
     },
     contractRef: 'builtin.files.exact-location',
+    ...(definition.id === 'files.edit' && options.fileEditBatchTarget
+      ? { fileEditBatchTarget: options.fileEditBatchTarget }
+      : {}),
+    // Both bindings describe the same scope. Batch planning is an execution
+    // detail and must not invalidate the edit half of an ordinary grant.
     configurationDigest: grantDigest({
       bindings: bindings as unknown as Json,
       scope: 'workspace-parent-slot-edit-write',
@@ -65,13 +75,16 @@ export function createFileToolBehaviors(options: {
             parent: actual.parent,
             path,
             actions: ['edit', 'write'],
+            ...(bound.externalWorkspaceDigest
+              ? { externalWorkspaceDigest: bound.externalWorkspaceDigest }
+              : {}),
           } as unknown as Json,
           bindings,
           presentation: {
-            label: '本会话内对此文件编辑和写入',
+            label: bound.externalWorkspaceDigest ? '允许后续编辑' : '本会话内对此文件编辑和写入',
             details: [
               `Session: ${request.sessionId}`,
-              `File: ${bound.root}/${path}`,
+              `File: ${join(bound.root, path)}`,
               'Actions: edit, write; this exact location only, no recursive directory access.',
               `Tools: ${bindings.map((binding) => `${binding.definitionId}@${binding.definitionVersion}`).join(', ')}`,
               'Current baseline, content conflicts, protected paths and current permissions are checked for every call.',
