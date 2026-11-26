@@ -90,6 +90,8 @@ Job 只有在 READY 核验与 GO 写入确认后进入 running。失败准入仍
 
 [实际 Windows Shell](../../packages/agent/test/isolated/jobs/windows-shell.test.ts)已核空 ambient PATH 的内置 rg、中文／空格文件、fork／管道、Git 子 Shell、受限与 Full 并发、写范围收窄、环境离线与准确联网范围、启动取消、后台后代取消、宿主 EOF／强杀与原 HANDLE 死亡。[真实 Service／SQLite](../../apps/service/test/isolated/shell-search-configuration.test.ts)核只读子 Agent、计划前检索和原审批卡、外部写入批准前零效果／批准后实际写入、重复命令及冷只读零重放。原 [Job owner 回归](../../packages/agent/test/isolated/jobs/windows-owned-child.test.ts)保关闭失败／unknown 合同。此范围是本机 Windows 开发验证，不代表完整安装、签名或全部平台发布资格。
 
+2026-11-26，Windows 源码 Desktop 与配套 Service 使用本机 Codex 的 `gpt-6-luna`／`medium` 复查合成文件交付。Git Shell 直跑原生 Git Bash，进程使用当前用户的令牌，文件与网络能力随该令牌及系统策略。模型请求 `workspace_write`／`network:none` 时，审批卡按原生进程的实际能力标记为 `full_access`／`internet`。审批只决定是否启动该命令。该次审批取消，原 Job 未派发，符合当前原生 Git Bash 的行为。新会话绑定 PowerShell 7.6.9 后，模型请求按 `workspace_write`／`network:none` 派发，原 Job 退出码为 0，进程树停止且清理确认，人工审批记录为 0。两份 Markdown 归档摘要与原文件一致，桌面在原回复下显示两张文件卡。记录位于本机 `.cache/conversation-powershell-evidence-20261126/` 的 `git-shell-approval.json` 和 `job-and-output.json`。
+
 2026-11-14 在 Windows x64／Bun 1.4.4 用 5,001 个文件的隔离工作区对照 `04807430e` 与本轮。每个后端和范围取三次首输出中位数。首次可核实检索从可写范围改用只读范围后，PowerShell 由 1,329ms 降至 464ms，Git Bash 由 1,602ms 降至 730ms，且无工作区权限账本。随后首次可写分别为 1,291ms 与 1,587ms，同范围热执行为 418ms 与 706ms。计时从原生 Job 工厂完成后的 start 开始。实际权限与调用结果另由 [Auto Service 回归](../../apps/service/test/isolated/windows-shell-auto.test.ts)验证。
 
 同机使用真实 Electron 开发窗口、独立 Profile 和固定审核结果，逐步观察两种 Shell 的检索、普通脚本、高风险批准、高风险拒绝、严重风险拒绝和再次检索。两种后端的可见审批卡数均为 0、0、1、1、0、0。四次脚本请求各只审核一次，审核材料含对应脚本正文。等待高风险确认期间尚未写入，普通脚本和批准的脚本实际写入，两种拒绝均无写入，随后输入和检索恢复。过程记录位于本机 `.cache/native-windows-auto-risk-result.json`，原生计时位于 `.cache/windows-auto-timing-results.json`。
