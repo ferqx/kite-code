@@ -276,7 +276,6 @@ export function isNativeBrowserDraftRestoreResult(
     Object.keys(result).every((key) => ['pages', 'activeId'].includes(key)) &&
     Object.hasOwn(result, 'pages') &&
     Array.isArray(result.pages) &&
-    result.pages.length <= 8 &&
     result.pages.every((page) => isNativeBrowserState(page) && page.control === undefined) &&
     new Set(result.pages.map((page) => page.id)).size === result.pages.length &&
     (result.activeId === undefined ||
@@ -295,7 +294,6 @@ export function isNativeBrowserRestoreResult(value: unknown): value is NativeBro
     (result.page === null || isNativeBrowserState(result.page)) &&
     (result.pages === undefined ||
       (Array.isArray(result.pages) &&
-        result.pages.length <= 8 &&
         result.pages.every(isNativeBrowserState) &&
         new Set(result.pages.map((page) => page.id)).size === result.pages.length &&
         (result.page === null

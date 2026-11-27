@@ -384,14 +384,15 @@ test('scoped multi-page restore remains compatible with the original single-page
     }),
   ).toBe(true);
   expect(isNativeBrowserRestoreResult({ scope, page: null, pages: [] })).toBe(true);
+  const pages = [
+    page,
+    ...Array.from({ length: 9 }, (_, index) => ({ ...page, id: `page-${index}` })),
+  ];
+  expect(isNativeBrowserRestoreResult({ scope, page, pages, activeId: 'page-8' })).toBe(true);
   for (const value of [
     { scope, page, pages: [other] },
     { scope, page, pages: [page, page] },
-    {
-      scope,
-      page,
-      pages: Array.from({ length: 9 }, (_, index) => ({ ...page, id: `page-${index}` })),
-    },
+    { scope, page, pages: pages.slice(1) },
     { scope, page, activeId: other.id },
     { scope, page: null, pages: [page] },
     { scope, page, pages: [page], permission: true },
@@ -402,7 +403,7 @@ test('scoped multi-page restore remains compatible with the original single-page
     expect(isNativeBrowserRestoreResult(value)).toBe(false);
 });
 
-test('draft restore returns only its bounded manual page inventory without a Core session or control grant', () => {
+test('draft restore accepts more than eight manual pages without a Core session or control grant', () => {
   const page = {
     id: 'draft-page',
     url: 'https://www.baidu.com/',
@@ -411,7 +412,8 @@ test('draft restore returns only its bounded manual page inventory without a Cor
     canGoBack: false,
     canGoForward: false,
   };
-  for (const value of [{ pages: [] }, { pages: [page] }, { pages: [page], activeId: page.id }])
+  const pages = Array.from({ length: 10 }, (_, i) => ({ ...page, id: `p${i}` }));
+  for (const value of [{ pages: [] }, { pages: [page] }, { pages, activeId: 'p9' }])
     expect(isNativeBrowserDraftRestoreResult(value)).toBe(true);
   const control = {
     phase: 'human',
@@ -426,7 +428,6 @@ test('draft restore returns only its bounded manual page inventory without a Cor
     {},
     { pages: null },
     { pages: [page, page] },
-    { pages: Array.from({ length: 9 }, (_, i) => ({ ...page, id: `p${i}` })) },
     { pages: [], activeId: page.id },
     { pages: [page], activeId: 'other' },
     { pages: [page], scope: { storeId: 's', sessionId: 'e', generation: 1, viewSelection: 1 } },

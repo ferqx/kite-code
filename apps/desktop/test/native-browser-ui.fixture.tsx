@@ -28,9 +28,13 @@ declare global {
       setScope(scope: string): void;
       draft(): string;
       readers(): { mounted: number; closed: number };
+      holdNextClose(): void;
+      failHeldClose(): boolean;
     };
   }
 }
+let holdClose = false;
+let failClose: (() => void) | undefined;
 function Fixture() {
   const [scope, setScope] = useState('session-a');
   // This isolated UI has no Core Caller. Each displayed Session owns a distinct
@@ -40,6 +44,15 @@ function Fixture() {
     setScope,
     draft: () => draft,
     readers: () => ({ mounted: mountedReaders, closed: closedReaders }),
+    holdNextClose: () => {
+      holdClose = true;
+    },
+    failHeldClose: () => {
+      if (!failClose) return false;
+      failClose();
+      failClose = undefined;
+      return true;
+    },
   };
   return (
     <SessionPage
@@ -68,7 +81,13 @@ function Fixture() {
           initialHint={nativeBrowserDisplayHint(props.id, undefined, draft)}
         />
       )}
-      closeBrowser={(id) => closeNativeBrowserTab(id, draft)}
+      closeBrowser={(id) => {
+        if (!holdClose) return closeNativeBrowserTab(id, draft);
+        holdClose = false;
+        return new Promise<void>((_resolve, reject) => {
+          failClose = () => reject(Error('fixture_close_not_confirmed'));
+        });
+      }}
       restoreBrowser={() => restoreNativeBrowserDraft(draft)}
       browserRestoreKey={draft}
       fileChangesContent={<Changes />}

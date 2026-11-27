@@ -80,7 +80,6 @@ function requestError(cause: unknown): string | undefined {
   if (code === 'browser_page_scope_denied') return;
   if (code === 'browser_page_grant_denied' || code === 'browser_session_page_already_bound')
     return '已有页面正在接管或保留控制，请先核对原任务。';
-  if (code === 'browser_tab_limit') return '最多打开8个浏览标签页，请先关闭一些标签。';
   if (code === 'browser_presentation_unavailable')
     return '网页显示尚未确认。请检查当前页面状态；你可以停止加载或重新输入地址。';
   return '浏览器暂不可用，请完全退出并重新启动应用后重试。';

@@ -501,8 +501,6 @@ export function registerNativeBrowserIpc(options: {
   };
   const create = (id: string, grantedScope?: BrowserPageScope, draft?: string): BrowserTab => {
     if (tabs.has(id)) throw Error('browser_page_already_exists');
-    if (tabs.size >= 8) throw Error('browser_tab_limit');
-    automation?.assertCanCreate();
     const view = new WebContentsView({
       webPreferences: {
         session: browsing,
@@ -2042,7 +2040,6 @@ export function registerNativeBrowserIpc(options: {
             'browser_layout_stale',
             'invalid_browser_address',
             'unsupported_browser_protocol',
-            'browser_tab_limit',
             'browser_page_scope_denied',
             'browser_page_control_required',
             'browser_page_unavailable',

@@ -246,17 +246,6 @@ export class NativeBrowserPageHost {
       this.grantContext = undefined;
     };
   }
-  assertCanCreate() {
-    for (const grant of this.grants.values()) this.refreshGrant(grant);
-    const reserved = [...this.grants.values()].filter(
-      (grant) =>
-        grant.state === 'question' &&
-        grant.page.kind === 'new' &&
-        !grant.binding &&
-        !grant.creating,
-    ).length;
-    if (this.pages.size + reserved >= 8) throw hostError('browser_page_capacity');
-  }
   private grantResult(grant: Grant) {
     return {
       requestId: grant.requestId,
@@ -487,7 +476,7 @@ export class NativeBrowserPageHost {
           !sameUrl(detail?.url, String(input.url))
         )
           throw hostError('browser_page_existing_mismatch');
-      } else if (!target) this.assertCanCreate();
+      }
       grant = {
         requestId: input.requestId,
         storeId: String(input.storeId),
@@ -626,8 +615,7 @@ export class NativeBrowserPageHost {
     return this.grantResult(grant);
   }
   add(port: BrowserPagePort) {
-    if (this.pages.has(port.id)) throw hostError('browser_page_capacity');
-    this.assertCanCreate();
+    if (this.pages.has(port.id)) throw hostError('browser_page_already_exists');
     const page: Page = {
       port,
       control: new BrowserPageLease({ ...port.scope, pageId: port.id, incarnation: randomUUID() }),

@@ -129,6 +129,9 @@ async function render(
   covered = false,
   childTabRequest?: SessionChildTabRequest,
   workspaceTab?: { requestId: number; onClose: () => void },
+  closeBrowser: (id: string) => void | Promise<void> = (id) => {
+    released.push(id);
+  },
 ) {
   root ??= createRoot(document.body);
   await act(() =>
@@ -158,7 +161,7 @@ async function render(
             ? { label: 'Host details', content: <p>Host details body</p>, onClose() {} }
             : undefined
         }
-        closeBrowser={(id) => released.push(id)}
+        closeBrowser={closeBrowser}
         childTabRequest={childTabRequest}
         renderChildSession={(target) => <Child {...target} />}
         onChildSessionChange={(target) => childChanges.push(target)}
@@ -251,8 +254,38 @@ test('a close captures its target in the click stack and immediately selects the
   });
   expect(f.model().tabs.map((tab) => tab.id)).toEqual([a!.id, b!.id]);
   expect(f.model().active).toBe(b!.id);
-  expect(f.model().closeIssue).toContain('未能确认网页已关闭');
   expect(f.closed).toHaveLength(1);
+});
+
+test('an unconfirmed last browser close restores its tab without inserting a notice', async () => {
+  let rejectClose!: (error: Error) => void;
+  const firstClose = new Promise<void>((_resolve, reject) => {
+    rejectClose = reject;
+  });
+  const closed: string[] = [];
+  await render('s', false, false, undefined, undefined, (id) => {
+    closed.push(id);
+    return closed.length === 1 ? firstClose : undefined;
+  });
+  await click('标签页');
+  const original = browserIds()[0]!;
+  const rail = document.querySelector('#session-tabs')!;
+  await click('关闭标签页：新标签页');
+  expect(rail.getAttribute('aria-hidden')).toBe('true');
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+
+  await act(async () => {
+    rejectClose(Error('close not confirmed'));
+    await Promise.resolve();
+  });
+  expect(rail.getAttribute('aria-hidden')).toBe('false');
+  expect(browserIds()).toEqual([original]);
+  expect(document.querySelector('[role="alert"]')).toBeNull();
+
+  await click('关闭标签页：新标签页');
+  expect(closed).toEqual([original, original]);
+  expect(rail.querySelector('[role="alert"]')).toBeNull();
+  expect(rail.getAttribute('aria-hidden')).toBe('true');
 });
 
 for (const boundary of ['intent', 'scope', 'scope-return'] as const) {
@@ -272,7 +305,6 @@ for (const boundary of ['intent', 'scope', 'scope-return'] as const) {
     });
     expect(f.model().active).toBe(successor);
     expect(f.model().tabs.some((tab) => tab.id === a)).toBe(boundary === 'intent');
-    expect(!!f.model().closeIssue).toBe(boundary === 'intent');
     expect(f.model().closeReveal).toBe(0);
     expect(f.closed).toHaveLength(1);
   });
@@ -294,7 +326,6 @@ test('a failed close after selecting another existing tab restores only its page
   expect(f.model().tabs.map((tab) => tab.id)).toEqual([a!.id, b!.id]);
   expect(f.model().tabs[0]!.title).toBe('Updated page');
   expect(f.model().active).toBe(a!.id);
-  expect(f.model().closeIssue).toContain('未能确认网页已关闭');
   expect(f.model().closeReveal).toBe(0);
 });
 
@@ -318,27 +349,27 @@ test('concurrent close failures merge exact pages without resurrecting a success
 });
 
 for (const outcome of ['success', 'failure'] as const) {
-  test(`pending close reserves its eighth slot until ${outcome}`, async () => {
+  test(`new tabs stay open when a pending close settles with ${outcome}`, async () => {
     const f = closeFixture();
     await f.render();
     for (let index = 0; index < 8; index++) await f.mutate((model) => model.addBrowser());
     const original = f.model().active;
     await f.mutate((model) => model.closeTab(original));
     await f.mutate((model) => model.addBrowser());
-    expect(f.model().tabs).toHaveLength(7);
+    expect(f.model().tabs).toHaveLength(8);
     await f.mutate((model) => {
-      expect(model.openChild({ sessionId: 'child' }, 'Child')).toBe(false);
-      expect(model.openWorkspace('Workspace')).toBe(false);
+      expect(model.openChild({ sessionId: 'child' }, 'Child')).toBe(true);
+      expect(model.openWorkspace('Workspace')).toBe(true);
       model.openChanges();
     });
-    expect(f.model().tabs).toHaveLength(7);
+    expect(f.model().tabs).toHaveLength(11);
     await act(async () => {
       if (outcome === 'success') f.closed[0]!.resolve();
       else f.closed[0]!.reject(Error('close failed'));
       await Promise.resolve();
     });
-    await f.mutate((model) => model.addBrowser());
-    expect(f.model().tabs).toHaveLength(8);
+    expect(f.model().tabs).toHaveLength(outcome === 'failure' ? 12 : 11);
+    expect(f.model().active).toBe('changes');
     expect(f.model().tabs.some((tab) => tab.id === original)).toBe(outcome === 'failure');
   });
 }
@@ -463,12 +494,13 @@ test('closing the final browser tab collapses the sidebar and reopening leaves a
   expect(document.querySelector('#session-tabs')!.getAttribute('aria-hidden')).toBe('false');
   expect(browserIds()).toHaveLength(1);
   expect(browserIds()[0]).not.toBe(first);
-  for (let i = 0; i < 7; i++) await click('新建标签页');
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
+  for (let i = 0; i < 9; i++) await click('新建标签页');
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(10);
   expect(
     document.querySelector<HTMLButtonElement>('button[aria-label="新建标签页"]')!.disabled,
-  ).toBe(true);
-  expect(document.querySelector<HTMLButtonElement>('.session-browser-tool')!.disabled).toBe(true);
+  ).toBe(false);
+  await changes();
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(11);
 });
 
 test.each([
@@ -651,7 +683,7 @@ test('child navigation after closing the final tab does not create an empty brow
   expect(browserIds()).toHaveLength(1);
 });
 
-test('full tabs reject a new child with feedback while an existing child can still be selected', async () => {
+test('a ninth tab can open a child, and an existing child is selected without duplication', async () => {
   childMounted = childClosed = 0;
   const first = { requestId: 10, sessionId: 'child', executionId: 'original', title: 'First task' };
   await render('s', false, false, first);
@@ -664,11 +696,13 @@ test('full tabs reject a new child with feedback while an existing child can sti
     executionId: 'other-task',
     title: 'Other task',
   });
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
-  expect(document.body.textContent).toContain('标签页已满，请关闭一个标签页后重试。');
-  expect(childMounted - childClosed).toBe(0);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(9);
+  expect(childMounted - childClosed).toBe(1);
+  expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
+    'Other task',
+  );
   await render('s', false, false, { ...first, requestId: 12 });
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(9);
   expect(childMounted - childClosed).toBe(1);
   expect(document.body.textContent).not.toContain('标签页已满');
 });
@@ -709,39 +743,35 @@ test('managed browser is one retained tab in the existing strip; switching and c
   expect(document.querySelector('[data-workspace-visible]')).toBeNull();
 });
 
-test('managed browser shares the eight-tab limit and an explicit request reselects it without duplicating', async () => {
-  let refused = 0;
+test('managed browser opens beyond eight tabs and an explicit request reselects it without duplicating', async () => {
+  let closed = 0;
   const request = {
     requestId: 1,
     onClose: () => {
-      refused++;
+      closed++;
     },
   };
   await render();
   await click('标签页');
   for (let i = 0; i < 7; i++) await click('新建标签页');
   await render('s', false, false, undefined, request);
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
-  expect(refused).toBe(1);
-  expect(document.body.textContent).toContain('标签页已满');
-  await click('关闭标签页：新标签页');
-  await render('s', false, false, undefined, { ...request, requestId: 2 });
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
-  expect(document.querySelectorAll('[data-workspace-visible]')).toHaveLength(1);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(9);
+  expect(
+    document.querySelector('[data-workspace-visible]')?.getAttribute('data-workspace-visible'),
+  ).toBe('true');
   await selectTab('新标签页');
   await render('s', false, false, undefined, { ...request, requestId: 3 });
   expect(
     document.querySelector('[data-workspace-visible]')?.getAttribute('data-workspace-visible'),
   ).toBe('true');
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
-  expect(refused).toBe(1);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(9);
+  expect(closed).toBe(0);
 });
 
-test('same-commit workspace and child requests reserve a shared final tab slot', async () => {
-  let workspaceRefused = 0;
+test('same-commit workspace and child requests both retain their tabs', async () => {
   await render();
   await click('标签页');
-  for (let i = 0; i < 6; i++) await click('新建标签页');
+  for (let i = 0; i < 7; i++) await click('新建标签页');
   await render(
     's',
     false,
@@ -749,17 +779,14 @@ test('same-commit workspace and child requests reserve a shared final tab slot',
     { requestId: 20, sessionId: 'late-child', title: 'Concurrent child' },
     {
       requestId: 20,
-      onClose: () => {
-        workspaceRefused++;
-      },
+      onClose: () => {},
     },
   );
-  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
-  // Child navigation uses the layout phase and reserves the final slot first.
-  expect(document.querySelectorAll('[data-workspace-visible]')).toHaveLength(0);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(10);
+  expect(
+    document.querySelector('[data-workspace-visible]')?.getAttribute('data-workspace-visible'),
+  ).toBe('true');
   expect(document.querySelector('[role="tab"][title="Concurrent child"]')).not.toBeNull();
-  expect(document.body.textContent).toContain('标签页已满');
-  expect(workspaceRefused).toBe(1);
 });
 
 test('a verified retained browser key survives background renders while a new reading scope must restore again', async () => {
@@ -1176,7 +1203,8 @@ test('trajectory is one ordinary bounded tab; hiding and switching release only 
   await act(() => model.closeTab('trajectory'));
   await act(() => model.addBrowser());
   expect(model.tabs).toHaveLength(8);
-  await act(() => expect(model.openTrajectory()).toBe(false));
+  await act(() => expect(model.openTrajectory()).toBe(true));
+  expect(model.tabs).toHaveLength(9);
   await act(() => root!.render(<Harness scope="another-session" />));
   expect(model.tabs).toEqual([]);
 });
@@ -1516,7 +1544,7 @@ test('trajectory details keep as-of materials and exact replay cursor strings', 
   expect(evidenceClosed).toBeGreaterThan(0);
 });
 
-test('file tabs deduplicate full Store Session file identity and share the eight-tab budget', async () => {
+test('file tabs deduplicate full Store Session file identity beyond eight tabs', async () => {
   let model!: SessionTabsModel;
   function Harness() {
     model = useSessionTabs('outputs');
@@ -1552,9 +1580,9 @@ test('file tabs deduplicate full Store Session file identity and share the eight
   await act(() => {
     for (let index = 0; index < 6; index++)
       expect(model.openFile({ ...target, fileId: `other-${index}` }, 'report.docx')).toBe(true);
-    expect(model.openFile({ ...target, fileId: 'overflow' }, 'report.docx')).toBe(false);
+    expect(model.openFile({ ...target, fileId: 'ninth' }, 'report.docx')).toBe(true);
   });
-  expect(model.tabs).toHaveLength(8);
+  expect(model.tabs).toHaveLength(9);
   await act(() => {
     expect(model.openFile(target, 'report.docx')).toBe(true);
   });

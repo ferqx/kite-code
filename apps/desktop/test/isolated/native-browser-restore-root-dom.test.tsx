@@ -71,7 +71,7 @@ test('close captures the exact Main token in its invocation stack and never clos
     ]);
     cache.rememberNativeBrowserState(successor, undefined, draft);
     rejectClose(Error('reply unknown'));
-    await expect(closing).rejects.toThrow('未能确认网页已关闭');
+    await expect(closing).rejects.toThrow('browser_close_unconfirmed');
     expect(requests).toEqual([
       { action: 'close', id: original.id, draft, pageToken: original.pageToken },
       { action: 'state', id: original.id, draft },
@@ -636,6 +636,15 @@ test('a fresh Root rebuilds the selected conversation and retained page from the
       }
       const current = generation;
       events.push(`${request.method}:${current}`);
+      if (request.method === 'draft.read' && request.sessionId === 'new-conversation')
+        return {
+          id: 'preparation-draft',
+          storeId: 'store',
+          workspaceId: 'new-conversation',
+          rootSessionId: 'new-conversation',
+          revision: 1,
+          content: '',
+        };
       const value = await control.bridge.request(request);
       if (
         request.method === 'select' ||
@@ -712,9 +721,14 @@ test('a fresh Root rebuilds the selected conversation and retained page from the
     await flush(() =>
       [...host.querySelectorAll('button')].find((node) => node.textContent === '新对话')!.click(),
     );
-    const preparation = () => host.querySelector('[role="textbox"][aria-label="新对话草稿"]');
-    await until(() => !!preparation());
+    const preparation = () =>
+      host.querySelector<HTMLTextAreaElement>('[role="textbox"][aria-label="新对话草稿"]');
+    await until(() => {
+      const input = preparation();
+      return !!input && !input.disabled && !input.readOnly;
+    });
     await act(() => setPromptText(preparation()!, 'keep this unsent preparation'));
+    expect(promptValue(preparation())).toBe('keep this unsent preparation');
     const beforePreparation = events.length,
       beforeGeneration = generation;
     // Bridge replacement restarts Root effects while React preserves its local

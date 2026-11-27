@@ -277,18 +277,23 @@ test('only a unique never-used initial blank can be initialized; historical or m
   }
 });
 
-test('fresh different-URL open at capacity fails without binding or navigating an existing page', async () => {
+test('a new-page grant can open beyond eight retained pages without binding or navigating an existing page', async () => {
   const f = fixture();
   try {
     for (let i = 0; i < 8; i++) f.add(`old-${i}`, scope, `https://example.test/keep-${i}`);
     f.host.present('old-0', true);
-    await expect(f.prepare()).rejects.toThrow('browser_page_capacity');
+    const grant = await f.prepare();
+    expect(grant).toMatchObject({ state: 'question', page: { kind: 'new' } });
     expect(f.created).toEqual([]);
+    const committed = await f.commitAuthorized(grant.requestId);
+    expect(committed.page.id).toBe(f.created[0]);
+    expect(f.created).toHaveLength(1);
     expect(f.sent).toEqual([]);
-    expect([...f.pages.values()].every((row) => row.attached === 0)).toBe(true);
-    expect([...f.pages.values()].map((row) => row.url)).toEqual(
-      Array.from({ length: 8 }, (_, i) => `https://example.test/keep-${i}`),
-    );
+    for (let i = 0; i < 8; i++)
+      expect(f.pages.get(`old-${i}`)).toMatchObject({
+        attached: 0,
+        url: `https://example.test/keep-${i}`,
+      });
   } finally {
     f.dispose();
   }
@@ -556,7 +561,7 @@ test('expiry reclaims only the untouched unconsumed page; navigation and a newer
   }
 });
 
-test('ambiguous matching pages fail while new proposals still reserve the last page slot', async () => {
+test('ambiguous matching pages fail, and pending new proposals do not block manual tabs', async () => {
   const f = fixture();
   try {
     f.add('a');
@@ -570,9 +575,11 @@ test('ambiguous matching pages fail while new proposals still reserve the last p
   try {
     for (let i = 0; i < 7; i++) full.add(`other-${i}`, { ...scope, sessionId: 'other' });
     const grant = await full.prepare();
-    expect(() => full.add('manual-last')).toThrow('capacity');
-    await full.commit(grant.requestId);
+    full.add('manual-eighth');
     expect(full.pages.size).toBe(8);
+    expect(full.created).toEqual([]);
+    await full.commit(grant.requestId);
+    expect(full.pages.size).toBe(9);
   } finally {
     full.dispose();
   }
@@ -654,11 +661,6 @@ test('requireExisting pins a matching live page, echoes the intent and recovers 
     try {
       const page = f.add('retained', scope, 'https://EXAMPLE.test:443/destination');
       if (mode === 'manual') f.host.arm('retained', scope);
-      let capacityChecks = 0;
-      f.host.assertCanCreate = () => {
-        capacityChecks++;
-        throw Error('existing_must_not_check_creation');
-      };
       const requestId = createBrowserGrantRequestId(),
         first = await f.prepare(requestId, 'open', existingFields(f));
       expect(first).toMatchObject({
@@ -672,7 +674,6 @@ test('requireExisting pins a matching live page, echoes the intent and recovers 
       expect(committed).toMatchObject({ requireExisting: true, page: { id: 'retained' } });
       expect(await f.inspect(requestId)).toEqual(committed);
       expect(await f.commitAuthorized(requestId)).toEqual(committed);
-      expect(capacityChecks).toBe(0);
       expect(f.created).toEqual([]);
       expect(f.closed).toEqual([]);
       expect(page.attached).toBe(0);
@@ -686,7 +687,7 @@ test('requireExisting pins a matching live page, echoes the intent and recovers 
   }
 });
 
-test('requireExisting missing, foreign and ambiguous pages reject before capacity checks, allocation or CDP', async () => {
+test('requireExisting missing, foreign and ambiguous pages reject before allocation or CDP', async () => {
   for (const mode of ['missing', 'foreign-store', 'foreign-session', 'ambiguous'] as const) {
     const f = fixture();
     try {
@@ -702,10 +703,6 @@ test('requireExisting missing, foreign and ambiguous pages reject before capacit
         f.add('a', scope, 'https://example.test/destination');
         f.add('b', scope, 'https://example.test/destination');
       }
-      let capacityChecks = 0;
-      f.host.assertCanCreate = () => {
-        capacityChecks++;
-      };
       const requestId = createBrowserGrantRequestId();
       const error = await f.prepare(requestId, 'open', existingFields(f)).catch((e) => e);
       expect(error).toBeInstanceOf(Error);
@@ -715,7 +712,6 @@ test('requireExisting missing, foreign and ambiguous pages reject before capacit
         op: 'prepareGrant',
       });
       await expect(f.inspect(requestId)).rejects.toThrow('grant_unavailable');
-      expect(capacityChecks).toBe(0);
       expect(f.created).toEqual([]);
       expect(f.closed).toEqual([]);
       expect(f.sent).toEqual([]);
@@ -736,9 +732,6 @@ test('requireExisting mismatched or blank URLs never navigate an existing page t
     const f = fixture();
     try {
       const page = f.add('retained', scope, url);
-      f.host.assertCanCreate = () => {
-        throw Error('must_not_create');
-      };
       await expect(
         f.prepare(createBrowserGrantRequestId(), 'open', existingFields(f)),
       ).rejects.toThrow('browser_page_existing_mismatch');

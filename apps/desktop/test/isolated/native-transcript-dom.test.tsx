@@ -1164,8 +1164,9 @@ test('five failed reconnections expose one expandable human-readable error in th
 });
 
 test('private provider diagnostics survive the lightweight session state and appear once in the original Turn', async () => {
-  const { mkdtempSync, realpathSync, rmSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
+  const { removeTemporaryDirectory, temporaryDirectory } = await import(
+    '../../../../tests/fixtures/test-filesystem'
+  );
   const { pathToFileURL } = await import('node:url');
   const { createRuntime } = await import('@kite-ai/agent');
   const { selectProfile } = await import('@kite-ai/agent/profile');
@@ -1173,7 +1174,7 @@ test('private provider diagnostics survive the lightweight session state and app
   const { createCompatibleModelBinding, createSdkModelAdapter } = await import('@kite-ai/ai/sdk');
   const { createClient } = await import('@kite-ai/client');
   const { startService } = await import('@kite-ai/service');
-  const folder = realpathSync(mkdtempSync(`${tmpdir()}/kite-provider-failure-`));
+  const folder = temporaryDirectory('kite-provider-failure-');
   const profile = selectProfile({ dataRoot: folder, profile: 'test' });
   const store = await openSqliteStore(profile);
   const storeId = (await store.getMetadata()).storeId;
@@ -1322,7 +1323,7 @@ test('private provider diagnostics survive the lightweight session state and app
     await service.close();
     await store.close();
     provider.stop(true);
-    rmSync(folder, { recursive: true, force: true });
+    removeTemporaryDirectory(folder);
   }
 });
 

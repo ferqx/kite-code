@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-在现有 SessionTabs 增加只读子详情标签，以准确子 Session／Execution 去重，与网页和变更共享8项上限。重复打开选择已有标签；新目标超出容量时显示必要反馈。父会话保持原 readingKey、标题、正文、输入、审批和环境卡，其原有读取与操作门禁继续运行。
+在现有 SessionTabs 增加只读子详情标签，以准确子 Session／Execution 去重，与网页和变更共用右侧栏。重复打开选择已有标签。[桌面标签数量决定](../architecture/2026-11-27-desktop-tab-count.md)替代原共享上限。父会话保持原 readingKey、标题、正文、输入、审批和环境卡，其原有读取与操作门禁继续运行。
 
 [NativeChildDetail](../../../../apps/desktop/src/native-child-detail.tsx)复用 Conversation、轮次／工具投影和已核实的 ModelOutput 快照。[环境 owner](../../../../apps/desktop/src/native-environment.tsx)继续拥有唯一活动子 reader 与有界已验证数据缓存。仅当前可见子标签激活该 reader；切换、关闭、收起、覆盖或换根释放读取和消息树，不停止业务任务。隐藏子标签只保存元数据、已验证数据和有界阅读状态，不保活监听或全文组件。父／子同时显示时，全选快捷键按事件目标、焦点与选区确定唯一所属阅读区。
 

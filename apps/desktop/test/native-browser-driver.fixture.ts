@@ -478,7 +478,7 @@ try {
     if (width !== 520) assert.ok(view.bounds.width > 100 && view.bounds.height > 100);
     assert.equal(
       await page.getByRole('button', { name: '标签页', exact: true }).getAttribute('aria-expanded'),
-      'true',
+      String(width !== 520),
     );
     assert.deepEqual(
       await retainedRail.getByRole('tab', { includeHidden: true }).allTextContents(),
@@ -702,6 +702,86 @@ try {
     await page.evaluate((theme) => (document.documentElement.dataset.theme = theme), theme);
     await page.screenshot({ path: join(directory, `sidebar-${theme}.png`) });
   }
+  const newTab = rail.getByRole('button', { name: '新建标签页', exact: true });
+  const chat = page.locator('.client-main-panel > main');
+  const originalMessage = page.getByText('链接后保留的回复。', { exact: true });
+  const chatNotices = chat.locator('[role="alert"], [role="status"]:text("标签页已满")');
+  const manyTabs = new Map<string, number>();
+  for (let index = 1; index <= 10; index++) {
+    if (index > 1) await newTab.click();
+    const url = `${origin}/tab-${index}`;
+    await address().fill(url);
+    await address().press('Enter');
+    await rail.getByRole('tab', { name: `Fixture Tab ${index}`, exact: true }).waitFor();
+    const deadline = Date.now() + 6000;
+    let visible = (await inspect()).filter((view) => view.visible);
+    while ((visible.length !== 1 || visible[0]?.url !== url) && Date.now() < deadline) {
+      await page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+      );
+      visible = (await inspect()).filter((view) => view.visible);
+    }
+    assert.deepEqual(
+      visible.map((view) => view.url),
+      [url],
+    );
+    manyTabs.set(url, visible[0]!.id);
+    assert.equal(await rail.getByRole('tab').count(), index);
+    assert.equal(await newTab.isEnabled(), true);
+    assert.equal(await chatNotices.count(), 0);
+    assert.equal(await originalMessage.count(), 1);
+  }
+  const lastTab = rail.getByRole('tab', { name: 'Fixture Tab 10', exact: true });
+  const closeLast = rail.getByRole('button', { name: '关闭标签页：Fixture Tab 10', exact: true });
+  assert.equal(
+    await lastTab.evaluate((node) => {
+      const tab = node.closest('.session-tab')!.getBoundingClientRect();
+      const strip = node.closest('[role="tablist"]')!.getBoundingClientRect();
+      return tab.left >= strip.left - 1 && tab.right <= strip.right + 1;
+    }),
+    true,
+  );
+  await rail.locator('.native-browser-viewport[aria-busy="false"]:visible').waitFor();
+  await page.screenshot({ path: join(directory, 'sidebar-ten-tabs.png') });
+  const layout = () =>
+    page.evaluate(() => ({
+      toolbarTop: Array.from(document.querySelectorAll('.native-browser-toolbar'))
+        .find((toolbar) => toolbar.getClientRects().length)
+        ?.getBoundingClientRect().top,
+      conversationTop: document.querySelector('.client-main-panel > main')?.getBoundingClientRect()
+        .top,
+    }));
+  const beforeClose = await layout();
+  assert.equal(typeof beforeClose.toolbarTop, 'number');
+  assert.equal(typeof beforeClose.conversationTop, 'number');
+  await page.evaluate(() => window.browserTabsFixture.holdNextClose());
+  await closeLast.click();
+  await lastTab.waitFor({ state: 'detached' });
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  assert.equal(await chatNotices.count(), 0);
+  assert.deepEqual(await layout(), beforeClose);
+  assert.equal(await page.evaluate(() => window.browserTabsFixture.failHeldClose()), true);
+  await lastTab.waitFor();
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  assert.equal(await chatNotices.count(), 0);
+  assert.equal(await originalMessage.count(), 1);
+  assert.deepEqual(await layout(), beforeClose);
+  await page.screenshot({ path: join(directory, 'sidebar-close-recovery.png') });
+  await closeLast.click();
+  await lastTab.waitFor({ state: 'detached' });
+  assert.equal(await rail.getByRole('alert').count(), 0);
+  assert.deepEqual(await layout(), beforeClose);
+  manyTabs.delete(`${origin}/tab-10`);
+  await rail.getByRole('button', { name: '收起标签栏' }).click();
+  await rail.waitFor({ state: 'hidden' });
+  await page.reload();
+  await page.waitForFunction(() => !!window.browserTabsFixture);
+  await page.evaluate(() => window.browserTabsFixture.setScope('session-b'));
+  await rail.getByRole('tab', { name: 'Fixture Tab 9', exact: true }).waitFor();
+  assert.equal(await rail.getByRole('tab').count(), 9);
+  assert.equal(await chatNotices.count(), 0);
+  assert.equal(await originalMessage.count(), 1);
+  assert.deepEqual(new Map((await inspect()).map((view) => [view.url, view.id])), manyTabs);
   if (process.platform === 'darwin') {
     await page.evaluate(() => {
       document.documentElement.dataset.platform = 'macos';
@@ -743,7 +823,7 @@ try {
   }
   console.log(`browser_electron_artifacts:${directory}`);
   console.log(
-    'browser_electron_pass: external reply links, keyboard, fragments, navigation, history, readers, resize, exact owner hide/restore, form/reading retention, isolation, foreign IPC, popup, download, explicit destruction',
+    'browser_electron_pass: external reply links, keyboard, fragments, navigation, history, readers, resize, exact owner hide/restore, form/reading retention, isolation, foreign IPC, popup, download, explicit destruction, ten real tabs, close recovery, nine-tab Root reload',
   );
 } finally {
   clearTimeout(timeout);

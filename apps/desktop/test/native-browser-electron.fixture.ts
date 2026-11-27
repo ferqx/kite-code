@@ -68,6 +68,10 @@ void app.whenReady().then(async () => {
       response.setHeader('content-type', 'text/javascript');
       slowScripts.add(response);
       response.on('close', () => slowScripts.delete(response));
+    } else if (/^\/tab-\d+$/.test(url.pathname)) {
+      const title = `Fixture Tab ${url.pathname.slice(5)}`;
+      response.setHeader('content-type', 'text/html; charset=utf-8');
+      response.end(`<!doctype html><title>${title}</title><h1>${title}</h1><input id="retained">`);
     } else if (url.pathname === '/one' || url.pathname === '/two') {
       const title = url.pathname === '/one' ? 'Page One' : 'Page Two';
       response.setHeader('content-type', 'text/html');

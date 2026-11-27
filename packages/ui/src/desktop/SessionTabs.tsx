@@ -146,7 +146,6 @@ export interface SessionTabsModel {
   readonly revealBrowserId?: string;
   readonly restoring?: boolean;
   readonly restoreIssue?: boolean;
-  readonly closeIssue?: string;
   readonly closeReveal?: number;
   readonly retryRestore?: () => void;
   readonly tabs: readonly SessionTab[];
@@ -165,7 +164,6 @@ export interface SessionTabsModel {
   readonly openWorkspace: (title: string) => boolean;
   readonly closeTab: (id: string, committed?: () => void) => void;
 }
-const maxTabs = 8;
 let nextTab = 0;
 function newBrowserTab(): SessionTab {
   return {
@@ -301,7 +299,6 @@ function initialTabs(scope: string, restoring = false) {
     selected: '',
     restoring,
     restoreIssue: false,
-    closeIssue: undefined as string | undefined,
     closeReveal: 0,
     restoredBrowserId: undefined as string | undefined,
     revealBrowserId: undefined as string | undefined,
@@ -340,7 +337,6 @@ export function useSessionTabs(
   const close = useRef(closeBrowser);
   close.current = closeBrowser;
   const intent = useRef(0);
-  const closing = useRef(new Map<string, object>());
   const restore = useRef(restoreBrowser);
   restore.current = restoreBrowser;
   useEffect(() => {
@@ -368,8 +364,9 @@ export function useSessionTabs(
           return;
         const value = latest.current;
         const pages = page?.pages ?? (page ? [page] : []);
-        const additions = pages.filter((page) => !value.tabs.some((tab) => tab.id === page.id));
-        if (value.tabs.length + additions.length > maxTabs) throw Error('browser_restore_capacity');
+        const existingIds = new Set(value.tabs.map((tab) => tab.id));
+        const pagesById = new Map(pages.map((page) => [page.id, page]));
+        const additions = pages.filter((page) => !existingIds.has(page.id));
         const activeId = page?.activeId ?? page?.id;
         settledRestore.current = admission;
         const next = {
@@ -383,14 +380,12 @@ export function useSessionTabs(
             ? {
                 tabs: [
                   ...value.tabs.map((tab) => {
-                    const restored = pages.find((page) => page.id === tab.id);
+                    const restored = pagesById.get(tab.id);
                     return restored ? { ...tab, title: restored.title } : tab;
                   }),
                   ...additions.map((page) => ({ ...page, kind: 'browser' as const })),
                 ],
-                selected: value.tabs.some((tab) => tab.id === value.selected)
-                  ? value.selected
-                  : (activeId ?? ''),
+                selected: existingIds.has(value.selected) ? value.selected : (activeId ?? ''),
               }
             : {}),
         };
@@ -418,7 +413,7 @@ export function useSessionTabs(
   }, [scope, restoreAttempt, restoreKey, restoreEnabled]);
   const { tabs, selected } = current;
   const active = tabs.some((tab) => tab.id === selected) ? selected : (tabs[0]?.id ?? '');
-  // Reserve each UI mutation immediately: two requests in one commit share the same eight slots.
+  // Apply each mutation immediately so requests in the same commit share the latest tabs.
   const update = (
     change: (value: ReturnType<typeof initialTabs>) => ReturnType<typeof initialTabs>,
   ) => {
@@ -435,7 +430,6 @@ export function useSessionTabs(
   useLayoutEffect(() => {
     const currentOwner = { admission };
     owner.current = currentOwner;
-    closing.current.clear();
     return () => {
       if (owner.current !== currentOwner) return;
       owner.current = undefined;
@@ -452,14 +446,8 @@ export function useSessionTabs(
       };
     });
   };
-  // An unconfirmed close still owns a slot: failure must restore that exact page.
-  const occupiedSlots = () =>
-    latest.current.tabs.length +
-    [...closing.current.keys()].filter((id) => !latest.current.tabs.some((tab) => tab.id === id))
-      .length;
   const addBrowser = () => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return;
-    if (occupiedSlots() >= maxTabs) return;
     intent.current++;
     const tab = newBrowserTab();
     update((value) => ({ ...value, tabs: [...value.tabs, tab], selected: tab.id }));
@@ -474,14 +462,12 @@ export function useSessionTabs(
       update((value) => ({ ...value, selected: existing.id }));
       return;
     }
-    if (occupiedSlots() >= maxTabs) return;
     const tab: SessionTab = { id: 'changes', kind: 'changes', title: '变更' };
     update((value) => ({ ...value, tabs: [...value.tabs, tab], selected: tab.id }));
   };
   const openTrajectory = () => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
     const existing = latest.current.tabs.find((tab) => tab.kind === 'trajectory');
-    if (!existing && occupiedSlots() >= maxTabs) return false;
     intent.current++;
     update((value) => ({
       ...value,
@@ -497,7 +483,6 @@ export function useSessionTabs(
     const tabs = latest.current.tabs;
     const id = `child-${JSON.stringify([target.sessionId, target.executionId ?? null])}`;
     const existing = tabs.find((tab) => tab.id === id);
-    if (!tabs.some((tab) => tab.id === id) && occupiedSlots() >= maxTabs) return false;
     intent.current++;
     const tab: SessionTab = {
       ...target,
@@ -521,7 +506,6 @@ export function useSessionTabs(
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
     const id = `file-${JSON.stringify([target.storeId, target.sessionId, 'handleId' in target ? ['local', target.handleId] : target.fileId])}`;
     const existing = latest.current.tabs.find((tab) => tab.id === id);
-    if (!existing && occupiedSlots() >= maxTabs) return false;
     intent.current++;
     const tab: SessionTab = {
       id,
@@ -538,8 +522,6 @@ export function useSessionTabs(
   };
   const openWorkspace = (title: string) => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
-    const tabs = latest.current.tabs;
-    if (!tabs.some((tab) => tab.kind === 'workspace') && occupiedSlots() >= maxTabs) return false;
     intent.current++;
     update((value) => ({
       ...value,
@@ -562,12 +544,7 @@ export function useSessionTabs(
     const closeIntent = ++intent.current;
     const closeOwner = owner.current;
     const closedTab = tabs[index]!;
-    const operation = {};
-    const release = () => {
-      if (closing.current.get(id) === operation) closing.current.delete(id);
-    };
     const failed = () => {
-      release();
       if (!closeOwner || owner.current !== closeOwner || currentAdmission.current !== admission)
         return;
       const value = latest.current;
@@ -579,8 +556,7 @@ export function useSessionTabs(
         ...value,
         tabs: restored,
         selected: unchangedIntent ? before.selected : value.selected,
-        closeIssue: '未能确认网页已关闭，原页面已保留，请核对页面状态。',
-        closeReveal: value.closeReveal + (unchangedIntent ? 1 : 0),
+        closeReveal: value.closeReveal + (unchangedIntent && remaining.length === 0 ? 1 : 0),
       };
       latest.current = next;
       setState(next);
@@ -589,12 +565,11 @@ export function useSessionTabs(
     try {
       // Capture and dispatch the exact Main page identity in the user's click
       // stack. No later DOM callback may look up a same-ID successor instead.
-      result = tabs[index]?.kind === 'browser' ? close.current?.(id) : undefined;
+      result = closedTab.kind === 'browser' ? close.current?.(id) : undefined;
     } catch {
       failed();
       return;
     }
-    if (result) closing.current.set(id, operation);
     update((value) => ({
       ...value,
       tabs: remaining,
@@ -602,14 +577,13 @@ export function useSessionTabs(
     }));
     if (closedTab.kind === 'file') fileClose.current?.(closedTab.target);
     committed?.();
-    if (result) void Promise.resolve(result).then(release, failed);
+    if (result) void Promise.resolve(result).catch(failed);
   };
   return {
     restoredBrowserId: current.restoredBrowserId,
     revealBrowserId: current.revealBrowserId,
     restoring: current.restoring || browserPending || restorePending,
     restoreIssue: current.restoreIssue,
-    closeIssue: current.closeIssue,
     closeReveal: current.closeReveal,
     retryRestore: () => {
       if (!restore.current || latest.current.restoring) return;
@@ -643,6 +617,7 @@ function SessionTabsHeader({
   visible,
 }: SessionTabsHeaderPresentation & { visible: boolean }) {
   const activeTab = useRef<HTMLDivElement>(null);
+  const activeIndex = data.tabs.findIndex((tab) => tab.id === data.active);
   const keyboardClose = useRef<HTMLButtonElement | null>(null);
   useLayoutEffect(() => {
     const closed = keyboardClose.current;
@@ -658,7 +633,7 @@ function SessionTabsHeader({
   useLayoutEffect(() => {
     const tab = activeTab.current;
     const strip = tab?.parentElement;
-    if (!visible || !data.active || !tab || !strip) return;
+    if (!visible || !data.active || activeIndex < 0 || !tab || !strip) return;
     // Opening a file can select a tab without moving keyboard focus. Reveal the
     // whole chip, including its close button, without scrolling its ancestors.
     const reveal = () => {
@@ -674,7 +649,7 @@ function SessionTabsHeader({
     observer.observe(strip);
     observer.observe(tab);
     return () => observer.disconnect();
-  }, [visible, data.active]);
+  }, [visible, data.active, activeIndex]);
   return (
     <header className="right-sidebar-heading session-tabs-heading">
       <TabsList aria-label="右侧栏标签页" className="session-tabs-list">
@@ -716,8 +691,8 @@ function SessionTabsHeader({
         className="ghost session-tab-add"
         size="icon-sm"
         aria-label="新建标签页"
-        title={data.tabs.length >= maxTabs ? '最多打开8个标签页' : '新建标签页'}
-        disabled={data.restoring || data.restoreIssue || data.tabs.length >= maxTabs}
+        title="新建标签页"
+        disabled={data.restoring || data.restoreIssue}
         onClick={() => dispatch({ type: 'add' })}
       >
         <HugeiconsIcon icon={Add01Icon} />
@@ -830,11 +805,7 @@ export function SessionTabs({
         <Button
           type="button"
           className="session-browser-tool"
-          disabled={
-            model.restoring ||
-            model.restoreIssue ||
-            (tabs.length >= maxTabs && !tabs.some((tab) => tab.kind === 'changes'))
-          }
+          disabled={model.restoring || model.restoreIssue}
           onClick={openChanges}
         >
           <HugeiconsIcon icon={tabIcons.changes} aria-hidden="true" />
@@ -844,11 +815,7 @@ export function SessionTabs({
           <Button
             type="button"
             className="session-browser-tool"
-            disabled={
-              model.restoring ||
-              model.restoreIssue ||
-              (tabs.length >= maxTabs && !tabs.some((tab) => tab.kind === 'trajectory'))
-            }
+            disabled={model.restoring || model.restoreIssue}
             onClick={() => model.openTrajectory()}
             aria-label="执行轨迹"
           >

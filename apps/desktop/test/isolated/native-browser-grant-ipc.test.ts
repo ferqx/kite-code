@@ -34,6 +34,7 @@ class Contents extends EventEmitter {
   url = '';
   pid = 0;
   attached = false;
+  backgroundThrottling = true;
   formValue = '';
   cssRemovals = 0;
   readonly cdp: { method: string; params: Record<string, unknown> }[] = [];
@@ -64,6 +65,12 @@ class Contents extends EventEmitter {
   }
   getZoomFactor() {
     return 1;
+  }
+  getBackgroundThrottling() {
+    return this.backgroundThrottling;
+  }
+  setBackgroundThrottling(value: boolean) {
+    this.backgroundThrottling = value;
   }
   frame?: (image: Electron.NativeImage) => void;
   beginFrameSubscription(_onlyDirty: boolean, receive: (image: Electron.NativeImage) => void) {
@@ -907,7 +914,7 @@ test('renderer replacement keeps manual contents alive and only owner-window dis
   }
 });
 
-test('Main restores every live scoped tab with the last presented selection and preserves the eight-page limit', async () => {
+test('Main restores more than eight live scoped tabs with the last presented selection', async () => {
   let selected = { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 1 };
   let presentationRevision = 0;
   const f = fixture(undefined, () => selected);
@@ -917,7 +924,7 @@ test('Main restores every live scoped tab with the last presented selection and 
       request,
     );
   try {
-    for (let index = 0; index < 8; index++)
+    for (let index = 0; index < 10; index++)
       expect(
         invoke({ action: 'navigate', id: `page-${index}`, input: `https://example.test/${index}` }),
       ).toMatchObject({ ok: true });
@@ -950,7 +957,7 @@ test('Main restores every live scoped tab with the last presented selection and 
       value: { page: { id: 'page-5' }, activeId: 'page-5' },
     });
     expect(restored.value.pages!.map((page: { id: string }) => page.id)).toEqual(
-      Array.from({ length: 8 }, (_, index) => `page-${index}`),
+      Array.from({ length: 10 }, (_, index) => `page-${index}`),
     );
     await Promise.resolve();
     f.host.arm('page-0', f.scope);
@@ -966,9 +973,6 @@ test('Main restores every live scoped tab with the last presented selection and 
       ok: true,
       value: { page: { id: 'page-0' }, activeId: 'page-5' },
     });
-    expect(
-      invoke({ action: 'navigate', id: 'overflow', input: 'https://example.test/overflow' }),
-    ).toEqual({ ok: false, code: 'browser_tab_limit' });
     const currentPageToken = readPageToken(invoke, 'page-5');
     selected = { ...selected, sessionId: 'other', viewSelection: 2 };
     expect(invoke({ action: 'restore', scope: selected })).toMatchObject({
@@ -990,7 +994,7 @@ test('Main restores every live scoped tab with the last presented selection and 
     expect(
       (invoke({ action: 'restore', scope: selected }) as { value: NativeBrowserRestoreResult })
         .value.pages,
-    ).toHaveLength(7);
+    ).toHaveLength(9);
     expect(
       invoke({ action: 'navigate', id: 'replacement', input: 'https://example.test/replacement' }),
     ).toMatchObject({ ok: true });

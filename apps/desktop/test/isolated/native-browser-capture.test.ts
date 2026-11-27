@@ -387,7 +387,6 @@ function fixture(
   const scope = { storeId: 'store', sessionId: 'session', generation: 1, viewSelection: 1 };
   const controlStates = new Map([['page', state]]);
   const automation = {
-    assertCanCreate() {},
     configureGrantContext: () => () => {},
     state: (id: string) => (ports.has(id) ? { ...controlStates.get(id)! } : undefined),
     arm(id: string) {

@@ -26,7 +26,6 @@ export async function closeNativeBrowserTab(
   if (!host?.browserRequest) throw Error('browser_close_unavailable');
   // This function is called in the X click stack, before the tab model changes.
   const pageToken = nativeBrowserDisplayHint(id, scope, draft)?.pageToken;
-  const message = '未能确认网页已关闭，原页面已保留，请核对页面状态。';
   if (!pageToken) {
     try {
       const current = await host.browserRequest({
@@ -36,7 +35,7 @@ export async function closeNativeBrowserTab(
       });
       if (current === null) return;
     } catch {}
-    throw Error(message);
+    throw Error('browser_close_unconfirmed');
   }
   try {
     await host.browserRequest({ action: 'close', id, pageToken, ...(draft ? { draft } : {}) });
@@ -51,7 +50,7 @@ export async function closeNativeBrowserTab(
       // A same-ID successor does not confirm or stand in for the captured page.
       if (current?.pageToken === pageToken) rememberNativeBrowserState(current, scope, draft);
     } catch {}
-    throw Error(message);
+    throw Error('browser_close_unconfirmed');
   }
 }
 export async function restoreNativeBrowserTab(scope: NativeBrowserRestoreScope) {

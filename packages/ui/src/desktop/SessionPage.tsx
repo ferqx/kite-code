@@ -415,7 +415,6 @@ function SessionPageContent({
   const presentedTabsKey = useRef<string | undefined>(undefined);
   const childTabOpener = useRef(tabModel.openChild);
   childTabOpener.current = tabModel.openChild;
-  const [tabLimitKey, setTabLimitKey] = useState<string>();
   const tabsOpen = tabsKey === tabsScopeKey && hasTabs;
   const scheduledEditorGeneration = useRef(0);
   const detailsOpeningWidth = useRef<number | undefined>(undefined);
@@ -874,9 +873,13 @@ function SessionPageContent({
     hostDetailsOpen,
     changeTabsOpen,
   ]);
+  const closeReveal = tabModel.closeReveal ?? 0;
+  const handledCloseReveal = useRef(0);
   useEffect(() => {
-    if (tabModel.closeReveal) changeTabsOpen(true, false);
-  }, [tabModel.closeReveal, changeTabsOpen]);
+    if (handledCloseReveal.current === closeReveal) return;
+    handledCloseReveal.current = closeReveal;
+    if (closeReveal) changeTabsOpen(true, false);
+  }, [closeReveal, changeTabsOpen]);
   const workspaceOperations = useRef(tabModel);
   workspaceOperations.current = tabModel;
   const workspaceRequest = useRef<string | undefined>(undefined);
@@ -940,7 +943,6 @@ function SessionPageContent({
     if (workspaceRequest.current === key) return;
     workspaceRequest.current = key;
     const opened = workspaceOperations.current.openWorkspace(request.label);
-    setTabLimitKey(opened ? undefined : tabsScopeKey);
     if (!opened) {
       request.onClose();
       return;
@@ -1023,8 +1025,7 @@ function SessionPageContent({
     const key = JSON.stringify([tabsScopeKey, request.requestId]);
     if (handledTrajectoryRequest.current === key) return;
     handledTrajectoryRequest.current = key;
-    const opened = trajectoryOpener.current();
-    setTabLimitKey(opened ? undefined : tabsScopeKey);
+    if (!trajectoryOpener.current()) return;
     detailClose.current?.();
     changeTabsOpen(true);
   }, [
@@ -1049,16 +1050,16 @@ function SessionPageContent({
     if (handledFileRequest.current !== undefined && request.requestId <= handledFileRequest.current)
       return;
     handledFileRequest.current = request.requestId;
-    const opened = fileOpener.current(request.target, request.title);
-    if (!opened) fileCloser.current?.(request.target);
-    setTabLimitKey(opened ? undefined : tabsScopeKey);
+    if (!fileOpener.current(request.target, request.title)) {
+      fileCloser.current?.(request.target);
+      return;
+    }
     detailClose.current?.();
     changeTabsOpen(true);
   }, [
     props.fileTabRequest,
     props.loading,
     hasTabs,
-    tabsScopeKey,
     tabModel.restoring,
     tabModel.restoreIssue,
     changeTabsOpen,
@@ -1085,7 +1086,7 @@ function SessionPageContent({
       request.childAgentIdentity,
     );
     handledChildRequest.current = key;
-    setTabLimitKey(opened ? undefined : tabsScopeKey);
+    if (!opened) return;
     detailClose.current?.();
     changeTabsOpen(true);
   }, [
@@ -1765,14 +1766,6 @@ function SessionPageContent({
                     }
                   >
                     {props.notices}
-                    {tabModel.closeIssue && (
-                      <p role="alert" className="notice error">
-                        {tabModel.closeIssue}
-                      </p>
-                    )}
-                    {tabLimitKey === tabsScopeKey && tabModel.tabs.length >= 8 && (
-                      <p role="status">标签页已满，请关闭一个标签页后重试。</p>
-                    )}
                     <div className="session-body">
                       <div
                         className={`session-view environment-information-${environmentMode}${animateEnvironment ? ' environment-information-animated' : ''}`}
