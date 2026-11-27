@@ -324,7 +324,7 @@ async function rowActionColors(action: Locator) {
 
 async function verifySessionRowLoading(page: Page) {
   const row = page.locator('.session-row[aria-label="Session B"]');
-  const spinner = row.locator('svg[aria-label="会话运行中"]');
+  const spinner = row.locator('[data-slot="spinner"][aria-label="会话运行中"]');
   const more = page.locator('.session-more[aria-label="Session B 更多操作"]');
   const moreIcon = more.locator('svg');
   const title = row.locator('.nav-copy');
@@ -334,6 +334,8 @@ async function verifySessionRowLoading(page: Page) {
     'hidden More does not take a separate layout slot',
   );
   const loadingBox = await spinner.boundingBox();
+  await expect(spinner).toHaveCSS('width', '14px');
+  await expect(spinner).toHaveCSS('animation-name', 'loading-ring-rotate');
   const moreBox = await more.boundingBox();
   assert.ok(loadingBox && moreBox);
   assert.ok(
@@ -362,7 +364,7 @@ async function verifySessionRowLoading(page: Page) {
   await more.hover();
   await expect(moreIcon).toHaveCSS('color', colors.highlighted);
   assert.equal(
-    await page.locator('.session-row[aria-label="Session A"] svg[role="status"]').isVisible(),
+    await page.locator('.session-row[aria-label="Session A"] [data-slot="spinner"]').isVisible(),
     true,
   );
   await page.mouse.move(1100, 650);

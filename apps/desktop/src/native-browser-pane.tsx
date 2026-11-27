@@ -638,7 +638,7 @@ export function NativeBrowserPane({
                 <p role="status">已停止加载</p>
               ) : (
                 <div className="native-browser-loading">
-                  <Spinner aria-label="网页加载中" className="size-5" />
+                  <Spinner aria-label="网页加载中" size={20} />
                 </div>
               )
             ) : (

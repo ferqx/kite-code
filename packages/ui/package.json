@@ -14,6 +14,7 @@
     "./desktop/image-gallery": "./src/desktop/ImageGallery.tsx",
     "./desktop/markdown": "./src/desktop/markdown-parser.ts",
     "./desktop/style.css": "./src/desktop/style.css",
+    "./desktop/spinner.css": "./src/desktop/spinner.css",
     "./tui/ink": "./src/tui/ink.ts"
   },
   "scripts": {

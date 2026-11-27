@@ -179,12 +179,12 @@ test('an optimistic first message replaces loading and welcome content', () => {
   expect(html).not.toContain('class="welcome"');
 });
 
-test('an uncached conversation keeps the content frame and shows only the centered brand mark', () => {
+test('an uncached conversation keeps the content frame and shows only the centered loading ring', () => {
   const html = renderToStaticMarkup(<SessionPage {...base} loading messages={[]} />);
 
   expect(html).toContain('class="conversation-loading"');
   expect(html).toContain('aria-label="正在加载聊天"');
-  expect(html).toContain('data-icon="kite-loading"');
+  expect(html).toContain('data-slot="spinner"');
   expect(html).not.toContain('正在加载会话历史');
   expect(html).not.toContain('class="welcome"');
 });

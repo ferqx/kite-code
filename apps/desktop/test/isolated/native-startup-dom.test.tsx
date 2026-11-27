@@ -147,9 +147,11 @@ test('retained startup hides the entire product until admitted attach and the co
   f.dom.window.document.documentElement.dataset.platform = 'windows';
   try {
     await f.render(false, true);
-    expect(f.host.querySelector('main[aria-label="Kite 启动页"]')?.getAttribute('aria-busy')).toBe(
-      'true',
-    );
+    const startup = f.host.querySelector('main[aria-label="Kite 启动页"]');
+    expect(startup?.getAttribute('aria-busy')).toBe('true');
+    expect(startup?.querySelector('h1')?.textContent).toBe('Kite');
+    expect(startup?.querySelector('img')).not.toBeNull();
+    expect(startup?.querySelector('[data-slot="spinner"]')).toBeNull();
     expect(f.host.textContent).not.toContain('正在准备');
     expect(f.host.querySelector('.shell')).toBeNull();
     expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBeNull();
@@ -164,6 +166,7 @@ test('retained startup hides the entire product until admitted attach and the co
     expect(openedMenus).toEqual([]);
     expect(f.calls.map((request) => request.method)).toEqual(['attach']);
     await act(async () => attach(state(1)));
+    expect(f.host.querySelector('.desktop-startup [data-slot="spinner"]')).toBeNull();
     expect(f.host.querySelector('.shell')).toBeNull();
     expect(f.host.querySelector('.native-window-titlebar')).toBeNull();
     expect(f.calls.map((request) => request.method)).toEqual(['attach', 'directory']);

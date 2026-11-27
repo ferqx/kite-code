@@ -4,7 +4,6 @@ import {
   Attachment01Icon,
   Cancel01Icon,
   FolderEditIcon,
-  Loading03Icon,
   Shield01Icon,
   ShieldAlertIcon,
   StopIcon,
@@ -42,6 +41,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
+import { Spinner } from './components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
 import { useErrorFeedback } from './error-feedback';
 import {
@@ -543,6 +543,7 @@ export function Composer(props: ComposerProps) {
   const permissionLabel = props.permission
     ? permissionText[props.permission].label
     : permissionText.placeholder;
+  const permissionIcon = permissionModes.find((mode) => mode.value === props.permission)?.icon;
   const cacheTokenTotal =
     (props.cacheMetrics?.cacheHitTokens ?? 0) + (props.cacheMetrics?.cacheMissTokens ?? 0);
   const cacheHitPercentage =
@@ -628,13 +629,13 @@ export function Composer(props: ComposerProps) {
             title={permissionLabel}
             disabled={confirmingFull || props.permissionDisabled || !props.permission}
           >
-            <HugeiconsIcon
-              data-icon="inline-start"
-              icon={
-                permissionModes.find((mode) => mode.value === props.permission)?.icon ??
-                Loading03Icon
-              }
-            />
+            {permissionIcon ? (
+              <HugeiconsIcon data-icon="inline-start" icon={permissionIcon} />
+            ) : props.permissionPending || props.sessionLoading ? (
+              <Spinner aria-hidden="true" />
+            ) : (
+              <HugeiconsIcon data-icon="inline-start" icon={Shield01Icon} />
+            )}
             <span className="permission-trigger-label">{permissionLabel}</span>
           </ShadcnButton>
         </DropdownMenuTrigger>
@@ -861,6 +862,8 @@ export function Composer(props: ComposerProps) {
                     </>
                   ) : image.previewError && !image.error && !onError ? (
                     <span>{image.previewError}</span>
+                  ) : !image.previewError && !image.error ? (
+                    <Spinner aria-hidden="true" />
                   ) : null}
                 </button>
                 <span className="composer-attachment-name" title={image.name}>
@@ -918,10 +921,7 @@ export function Composer(props: ComposerProps) {
             role="status"
             aria-label="正在添加附件"
           >
-            <HugeiconsIcon
-              icon={Loading03Icon}
-              className="size-[var(--ui-icon-size,14px)] animate-spin"
-            />
+            <Spinner aria-hidden="true" />
             <Button
               variant="ghost"
               size="sm"
@@ -1137,11 +1137,11 @@ export function Composer(props: ComposerProps) {
                   disabled={!canSend}
                   readOnly={props.readGate?.send}
                 >
-                  <HugeiconsIcon
-                    icon={sendLoading ? Loading03Icon : ArrowUp02Icon}
-                    className={sendLoading ? 'motion-safe:animate-spin' : undefined}
-                    strokeWidth={2}
-                  />
+                  {sendLoading ? (
+                    <Spinner aria-hidden="true" />
+                  ) : (
+                    <HugeiconsIcon icon={ArrowUp02Icon} strokeWidth={2} />
+                  )}
                 </Button>
               )}
             </div>

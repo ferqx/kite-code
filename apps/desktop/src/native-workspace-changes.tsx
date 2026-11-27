@@ -6,6 +6,7 @@ import {
   FileTreeFile,
   FileTreeFolder,
   Input,
+  Spinner,
 } from '@kite-ai/ui/desktop';
 import {
   type CSSProperties,
@@ -177,7 +178,7 @@ function WorkspaceChangeDetail({
             aria-label="正在读取当前差异"
             aria-busy="true"
           >
-            <span className="workspace-change-spinner" />
+            <Spinner aria-hidden="true" size={16} />
           </div>
         )}
       </>
@@ -719,7 +720,7 @@ function WorkspaceChangesView({
           aria-label="正在读取工作区"
           aria-busy="true"
         >
-          <span className="workspace-change-spinner" />
+          <Spinner aria-hidden="true" size={16} />
         </div>
       )}
       {current.error && (

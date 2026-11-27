@@ -837,7 +837,9 @@ test('request dots keep record rows stable and open exact current, historical an
   expect(h.state().selectedNodeId).toBe('execution:model');
   expect(h.state().requestTab).toBe('usage');
   expect(requestDetail()).toBeNull();
-  expect(document.body.textContent).toContain('正在读取所选记录');
+  expect(
+    document.querySelector('[data-slot="spinner"][aria-label="正在读取所选记录"]'),
+  ).not.toBeNull();
   await h.render();
   expect(requestTabs()).toEqual(['概述', '选项', '用量', '计时']);
   expect(requestDetail().textContent).toContain('8086');
@@ -1489,7 +1491,9 @@ test('historical cursor and observation versions reject future or foreign bodies
   absent('execution:retry');
   await h.render(false, true);
   expect(detail().textContent).not.toContain('FUTURE MATERIAL');
-  expect(detail().textContent).toContain('正在读取原版本材料');
+  expect(
+    detail().querySelector('[data-slot="spinner"][aria-label="正在读取原版本材料"]'),
+  ).not.toBeNull();
   await h.render();
   const requestMarker = document.querySelector<HTMLButtonElement>(
     '.trajectory-request-marker[data-request-owner="execution:model"]',
@@ -1567,7 +1571,9 @@ test('held initial and reopened reads preserve cached selection and legal tab wi
   await tab('结果');
   await h.setState({ ...h.state(), detailScrollTop: 73 });
   await h.render(true);
-  expect(document.body.textContent).toContain('正在读取所选记录');
+  expect(
+    document.querySelector('[data-slot="spinner"][aria-label="正在读取所选记录"]'),
+  ).not.toBeNull();
   expect(document.body.textContent).not.toContain('全部事件');
   expect(detail()).toBeNull();
   await all();

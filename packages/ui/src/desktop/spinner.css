@@ -1,0 +1,32 @@
+[data-slot="spinner"]:not([hidden]) {
+  display: inline-block;
+  box-sizing: border-box;
+  flex: none;
+  inline-size: var(--loading-ring-size, var(--ui-icon-size, 14px));
+  block-size: var(--loading-ring-size, var(--ui-icon-size, 14px));
+  border: 2px solid var(--loading-ring-track, var(--border));
+  border-top-color: var(--loading-ring-highlight, var(--muted-foreground, currentColor));
+  border-radius: 50%;
+  vertical-align: middle;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-slot="spinner"]:not([hidden]) {
+    animation: loading-ring-rotate 1s linear infinite;
+  }
+}
+
+@media (forced-colors: active) {
+  [data-slot="spinner"]:not([hidden]) {
+    forced-color-adjust: none;
+    border-color: GrayText;
+    border-top-color: CanvasText;
+  }
+}
+
+@keyframes loading-ring-rotate {
+  to {
+    transform: rotate(1turn);
+  }
+}

@@ -1,9 +1,4 @@
-import {
-  ArrowDown01Icon,
-  ArrowDown02Icon,
-  KiteIcon,
-  ReduceParagraphIcon,
-} from '@hugeicons/core-free-icons';
+import { ArrowDown01Icon, ArrowDown02Icon, ReduceParagraphIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   type ComponentProps,
@@ -41,6 +36,7 @@ import {
 import { ClipboardWriteContext, CodeCopyEligibilityContext } from './clipboard';
 import { Collapsible, CollapsibleTrigger } from './components/ui/collapsible';
 import { ScrollArea } from './components/ui/scroll-area';
+import { Spinner } from './components/ui/spinner';
 import { TraceIcon, TraceLine, TraceTitle } from './components/ui/trace';
 import {
   type ConversationScrollAnchor,
@@ -2233,7 +2229,7 @@ export function Conversation({
         </div>
         {loading && (
           <div className="conversation-loading" role="status" aria-label="正在加载聊天">
-            <HugeiconsIcon aria-hidden="true" data-icon="kite-loading" icon={KiteIcon} />
+            <Spinner aria-hidden="true" size={16} />
           </div>
         )}
         {!following && !loading && (

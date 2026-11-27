@@ -7,6 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   SettingsActionIcon,
+  Spinner,
 } from '@kite-ai/ui/desktop';
 import { useId, useState } from 'react';
 import type { NativeUserMcpOperation } from './mcp-bridge';
@@ -143,8 +144,8 @@ export function McpToolCatalogue({
           </Button>
         </div>
       ) : !page ? (
-        <p className="provider-field-help" role="status">
-          正在加载工具…
+        <p className="provider-field-help">
+          <Spinner aria-label="正在加载工具" />
         </p>
       ) : (
         <>
@@ -197,9 +198,11 @@ export function McpToolCatalogue({
             <Button
               className="provider-button"
               disabled={loading}
+              aria-busy={loading || undefined}
               onClick={() => onMore(page.nextAfterIndex!)}
             >
-              {loading ? '正在加载…' : '加载更多'}
+              {loading && <Spinner aria-hidden="true" />}
+              加载更多
             </Button>
           )}
           {!page.entries.length && page.complete && (

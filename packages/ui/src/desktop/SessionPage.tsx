@@ -1,5 +1,4 @@
 import {
-  KiteIcon,
   ListIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -15,6 +14,7 @@ import { Conversation } from './Conversation';
 import { ConversationCache, type ConversationCacheScope } from './ConversationCache';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable';
 import { NativeScrollbars } from './components/ui/scroll-area';
+import { Spinner } from './components/ui/spinner';
 import { FileChanges } from './FileChanges';
 import {
   NewConversationContext,
@@ -1826,11 +1826,7 @@ function SessionPageContent({
                             role="status"
                             aria-label="正在加载聊天"
                           >
-                            <HugeiconsIcon
-                              aria-hidden="true"
-                              data-icon="kite-loading"
-                              icon={KiteIcon}
-                            />
+                            <Spinner aria-hidden="true" size={16} />
                           </div>
                         )}
                       </div>

@@ -121,7 +121,8 @@ test.each([
       return null;
     },
   } as NativeBridge;
-  const loader = () => document.querySelectorAll('svg[role="status"][aria-label="文件预览加载中"]');
+  const loader = () =>
+    document.querySelectorAll('[data-slot="spinner"][role="status"][aria-label="文件预览加载中"]');
   const zoom = () => document.querySelector<HTMLButtonElement>('[aria-label="预览缩放"]')!;
   const imageZoom = () => document.querySelector<HTMLButtonElement>('[aria-label="图片缩放"]')!;
   const button = (name: string) =>

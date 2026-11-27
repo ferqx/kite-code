@@ -280,7 +280,9 @@ void app
             initialAttempts === attempt &&
             (await primary.webContents.executeJavaScript(`(() => {
               const viewport = document.querySelector('.native-file-preview > .native-file-preview-viewport');
-              const icons = viewport?.querySelectorAll('svg[role="status"][aria-label="文件预览加载中"]');
+              const icons = viewport?.querySelectorAll(
+                '[data-slot="spinner"][role="status"][aria-label="文件预览加载中"]',
+              );
               if (icons?.length !== 1 || viewport.textContent.trim()) return false;
               const frame = viewport.getBoundingClientRect(), icon = icons[0].getBoundingClientRect();
               return icon.width > 0 && icon.height > 0 &&

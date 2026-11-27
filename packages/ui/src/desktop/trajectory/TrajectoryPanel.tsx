@@ -43,6 +43,7 @@ import { Input } from '../components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../components/ui/resizable';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Sheet, SheetContent, SheetTitle } from '../components/ui/sheet';
+import { Spinner } from '../components/ui/spinner';
 import { cn } from '../lib/utils';
 import { Button } from '../ui';
 import { trajectoryFactAnchor } from './fact-anchor';
@@ -832,8 +833,8 @@ export function TrajectoryPanel(props: TrajectoryPanelProps) {
         }}
       >
         {waiting ? (
-          <p className="trajectory-tree-loading" role="status">
-            正在读取事件树…
+          <p className="trajectory-tree-loading">
+            <Spinner aria-label="正在读取事件树" size={16} />
           </p>
         ) : (
           <table
@@ -1170,8 +1171,8 @@ export function TrajectoryPanel(props: TrajectoryPanelProps) {
     </nav>
   );
   const detail = waiting ? (
-    <p role="status" className="trajectory-tree-loading">
-      正在读取所选记录…
+    <p className="trajectory-tree-loading">
+      <Spinner aria-label="正在读取所选记录" size={16} />
     </p>
   ) : selectedRequest ? (
     <TrajectoryRequestDetails

@@ -92,7 +92,7 @@ function OutputFileMenu({
           aria-busy={revealing || undefined}
         >
           {revealing ? (
-            <Spinner aria-hidden="true" className="motion-reduce:animate-none" />
+            <Spinner aria-hidden="true" />
           ) : (
             <HugeiconsIcon icon={MoreHorizontalIcon} aria-hidden="true" />
           )}

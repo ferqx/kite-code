@@ -7,6 +7,7 @@ import {
   PopoverContent,
   PopoverTrigger,
   SelectField,
+  Spinner,
   Textarea,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -358,13 +359,15 @@ export function AgentBrowserPanel({
         role="status"
       >
         <strong>
-          {view
-            ? labels[view.state]
-            : state.loading
-              ? '正在读取浏览器…'
-              : state.available
-                ? '此会话还没有 Agent 浏览器'
-                : '此连接尚未提供 Agent 浏览器'}
+          {view ? (
+            labels[view.state]
+          ) : state.loading ? (
+            <Spinner aria-label="正在读取浏览器" />
+          ) : state.available ? (
+            '此会话还没有 Agent 浏览器'
+          ) : (
+            '此连接尚未提供 Agent 浏览器'
+          )}
         </strong>
         <span title="此页的只读快照；关闭注释不会停止任务。">{view?.title || '受管浏览器'}</span>
       </div>

@@ -28,6 +28,7 @@ import {
 } from '../components/ui/code-block';
 import { Input } from '../components/ui/input';
 import { ScrollArea } from '../components/ui/scroll-area';
+import { Spinner } from '../components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { MessageContent } from '../MessageContent';
 import { highlightMarkdownCode } from '../markdown-highlight';
@@ -670,8 +671,12 @@ function PublicMaterial({
   approvalCheck?: boolean;
   delegation?: boolean;
 }) {
-  if (!view) return <p role="status">正在读取原版本材料…</p>;
-  if (view.status === 'loading') return <p role="status">正在读取原版本材料…</p>;
+  if (!view || view.status === 'loading')
+    return (
+      <p>
+        <Spinner aria-label="正在读取原版本材料" size={16} />
+      </p>
+    );
   if (['missing', 'unavailable', 'redacted', 'empty'].includes(view.status))
     return (
       <p role="status">

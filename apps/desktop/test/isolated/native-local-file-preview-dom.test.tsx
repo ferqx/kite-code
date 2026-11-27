@@ -145,7 +145,9 @@ test('local preview owns no write action; hide closes view, late reads cannot re
     await show(true);
     expect(document.querySelector('[aria-label="请求修改"]')).toBeNull();
     expect(
-      document.querySelectorAll('svg[role="status"][aria-label="文件预览加载中"]'),
+      document.querySelectorAll(
+        '[data-slot="spinner"][role="status"][aria-label="文件预览加载中"]',
+      ),
     ).toHaveLength(1);
     expect(document.body.textContent).not.toContain('正在读取文件');
     await act(async () => root.render(null));

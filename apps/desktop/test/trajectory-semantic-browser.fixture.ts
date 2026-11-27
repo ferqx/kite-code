@@ -510,7 +510,7 @@ export async function verifySemanticTrajectory(input: {
         title?.nextElementSibling?.textContent ??
           (detailText.includes('不可读')
             ? '材料暂不可读'
-            : detailText.includes('正在读取原版本材料')
+            : document.querySelector('.trajectory-detail [aria-label="正在读取原版本材料"]')
               ? '正在读取原版本材料…'
               : ''),
       );
@@ -531,7 +531,7 @@ export async function verifySemanticTrajectory(input: {
       window as unknown as { trajectoryFixture: { reconnect(): void } }
     ).trajectoryFixture.reconnect(),
   );
-  await detail.getByText('正在读取原版本材料…', { exact: true }).first().waitFor();
+  await detail.getByRole('status', { name: '正在读取原版本材料' }).first().waitFor();
   await page.evaluate(() =>
     (
       window as unknown as { trajectoryFixture: { releaseMaterials(): void } }

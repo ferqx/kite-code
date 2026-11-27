@@ -50,7 +50,7 @@ export function NativeFilePreviewStatus({
   return (
     <div className="native-file-preview-state">
       {state === 'loading' ? (
-        <Spinner aria-label="文件预览加载中" className="size-5 motion-reduce:animate-none" />
+        <Spinner aria-label="文件预览加载中" size={20} />
       ) : (
         <div className="native-file-preview-error">
           <p role="status">{state.message}</p>

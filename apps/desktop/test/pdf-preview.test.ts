@@ -13,6 +13,8 @@ test('PDF navigation is isolated read-only chrome, lazy and counter-scaled', () 
   expect(rail.querySelectorAll('img[loading=lazy]').length).toBe(3);
   expect(img.getAttribute('src')).toBe('page-1.png');
   expect(loader.hasAttribute('hidden')).toBe(false);
+  expect(loader.getAttribute('data-slot')).toBe('spinner');
+  expect(loader.previousElementSibling?.textContent).toContain('@keyframes loading-ring-rotate');
   img.dispatchEvent(new w.Event('load'));
   expect(loader.hasAttribute('hidden')).toBe(true);
   (rail.querySelectorAll('button')[2] as HTMLButtonElement).click();

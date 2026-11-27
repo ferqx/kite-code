@@ -1,4 +1,4 @@
-import { Button, Input, useErrorFeedback } from '@kite-ai/ui/desktop';
+import { Button, Input, Spinner, useErrorFeedback } from '@kite-ai/ui/desktop';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NativeSettingsRequestPort } from './native-bridge';
@@ -288,8 +288,8 @@ function SearchPanel({
             aria-busy={searching || undefined}
           >
             {search?.status === 'searching' && (
-              <p className="skill-marketplace-empty" role="status">
-                正在搜索 Skills.sh…
+              <p className="skill-marketplace-empty">
+                <Spinner aria-label="正在搜索 Skills.sh" size={16} />
               </p>
             )}
             {search?.status === 'failed' && !onError && (

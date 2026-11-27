@@ -1,7 +1,8 @@
 /** Shared presentation used by the read-only browser without loading the desktop entry. */
+
+export { Spinner } from './browser-spinner';
 export { ContextPanel } from './context';
 export { Badge } from './desktop/components/ui/badge';
-export { Spinner } from './desktop/components/ui/spinner';
 export {
   Tooltip,
   TooltipContent,

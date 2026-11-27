@@ -53,7 +53,7 @@ Shell 工具行与当前工具的思维链摘要使用原命令或已核实的�
 
 同一会话行接受宿主确认的 `SessionSummary.hasCreatedWorktree`，在右侧显示14px Git 分支图标，并在无障碍描述与原悬浮提示中说明“已创建 Git 工作树”；它与运行中、待输入及未读标记并存。UI 不自行检查目录或读取工具正文，字段缺失时不显示；[Sidebar 回归](test/isolated/desktop-sidebar-render.test.tsx)核对标记接管、原节点保留与状态共存。历史事实及持久读取由[Native owner](../../apps/desktop/README.md#native-项目会话目录)和其上游负责。
 
-会话行的运行中与等待执行 Spinner 和空间操作图标在[共享样式](src/desktop/style.css)中统一消费 `--ui-icon-size`（14px）；会话 Spinner 单独使用2.4秒一圈的匀速动画，其他加载位置沿用原速度。会话标题的左缩进按空间行的10px内边距、图标宽度与10px间距计算，与空间名称左缘对齐；选中背景仍覆盖整行。
+会话行的运行中与等待执行 Spinner 和空间操作图标在[共享样式](src/desktop/style.css)中统一消费 `--ui-icon-size`（14px）；桌面的加载指示复用 [Spinner](src/desktop/components/ui/spinner.tsx) 和[圆环样式](src/desktop/spinner.css)。圆环沿用「变更」页的轨道和高亮弧段，正常时每秒一圈，启用减少动态效果时静止。行内默认14px，内容区沿各自布局指定尺寸。会话标题的左缩进按空间行的10px内边距、图标宽度与10px间距计算，与空间名称左缘对齐；选中背景仍覆盖整行。
 
 2026-11-09，Windows x64／Bun1.4.4，`e8a483d65`加会话缩进修复：两份侧栏完整回归14项／393断言、定向Biome、隔离Native生产样式编译及文档检查通过。用户截图中的旧26px缩进改为34px，与空间行文字起点一致。IAB连接本机服务超时，本机Chrome观察因工具无法可靠识别当前URL而中止，修后实际外观及折叠／切换全过程尚未验收；不以DOM回归或编译结果代替实机结论。
 
@@ -440,7 +440,7 @@ Conversation 的 `systemKind:agent_result` 只消费宿主已确认实际触发�
 
 同日左栏双按钮修复：新增侧栏DOM3项／70断言，三个用例在原实现均失败，修复后通过；连同原页面、定时任务和Native页面共51项／849断言、UI typecheck及定向Biome通过。Chrome155在亮／暗Mica与暗色实色三场景沿实际SessionPage及Native CSS复现拉宽后导航为200px却仍 `aria-hidden`／`inert`、两个按钮均绘制；修复后只有一个可用按钮。另核桌面手动关闭、窄窗浮层开关、600／601px反复切换、保存宽度、键盘收起、草稿及右侧变更面板恢复；安装版、其他平台和全量测试仍未运行。
 
-公共 Desktop 入口也导出已有 [Badge](src/desktop/components/ui/badge.tsx) 与 [Spinner](src/desktop/components/ui/spinner.tsx)，供 Web 目录复用原关注提示和加载图标；没有 Tailwind 编译的 Web 仅保留必要 scoped CSS，关注配色沿 attention 语义变量及系统语义色回退。
+Web 目录从轻量浏览器入口复用 [Badge](src/desktop/components/ui/badge.tsx) 和 [Spinner](src/browser-spinner.tsx)。没有 Tailwind 编译的 Web 使用自身的目录样式，关注配色沿 attention 语义变量及系统语义色回退。
 
 同一公共入口现导出原[Tooltip](src/desktop/components/ui/tooltip.tsx)四个组件，供[Web目录](../../apps/web/README.md)复用已有hover／focus／Escape和共享延迟行为；原组件、Radix依赖与Native Sidebar保持。Web负责准确公共activity、读取生命周期和本包scoped CSS，不引入第二份计时器、运行状态或业务authority。Web完整DOM、可信browser build与本机IAB证据归该owner和[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11web-完整工作区与会话目录)，不据新增export宣称全平台资格。
 

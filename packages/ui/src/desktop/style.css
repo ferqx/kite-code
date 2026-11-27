@@ -1,5 +1,6 @@
 @import "katex/dist/katex.min.css";
 @import "./file-diff.css";
+@import "./spinner.css";
 @reference "shadcn/tailwind.css";
 
 [data-slot="file-tree-icon"] {
@@ -777,19 +778,6 @@ body {
     place-items: center;
     pointer-events: none;
   }
-  .conversation-loading svg {
-    width: 48px;
-    height: 48px;
-    color: var(--muted-foreground);
-    opacity: 0.2;
-    animation: conversation-loading-shimmer 1.6s ease-in-out infinite;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .conversation-loading svg {
-      opacity: 0.28;
-      animation: none;
-    }
-  }
   :is(.conversation-viewport, .conversation-jump) {
     width: 100%;
     min-width: 0;
@@ -1365,7 +1353,9 @@ body {
     font-size: var(--select-font-size);
     line-height: var(--select-line-height);
   }
-  .composer :is(.model-trigger, .permission-trigger, .context-trigger) > svg {
+  .composer
+    :is(.model-trigger, .permission-trigger, .context-trigger)
+    > :is(svg, [data-slot="spinner"]) {
     width: var(--select-icon-size);
     height: var(--select-icon-size);
   }
@@ -1374,6 +1364,10 @@ body {
   .composer-action > svg {
     width: var(--ui-icon-size);
     height: var(--ui-icon-size);
+  }
+  .composer-action > [data-slot="spinner"] {
+    --loading-ring-highlight: currentColor;
+    --loading-ring-track: color-mix(in srgb, currentColor 18%, transparent);
   }
   .model-trigger {
     max-width: min(220px, 100%);
@@ -2232,16 +2226,16 @@ body {
   padding-inline-end: 4px;
   background: transparent;
 }
-.kite-client :where(.session-heading) .sidebar-actions {
+.kite-client :where(.space-heading, .session-heading) .sidebar-actions {
   padding-inline-end: 4px;
 }
-.kite-client .session-heading:has(> .session-row > svg[role="status"]) > .sidebar-actions {
+.kite-client .session-heading:has(> .session-row > [data-slot="spinner"]) > .sidebar-actions {
   position: absolute;
   inset-inline-end: 0;
 }
 .kite-client .space-heading :is(.space-new-session, .space-more) > svg,
 .kite-client .session-row > .session-worktree-icon,
-.kite-client .session-row > svg[role="status"] {
+.kite-client .session-row > [data-slot="spinner"] {
   width: var(--ui-icon-size);
   height: var(--ui-icon-size);
 }
@@ -2249,10 +2243,7 @@ body {
   flex: none;
   color: var(--muted-foreground);
 }
-.kite-client .session-row > svg[role="status"] {
-  animation-duration: 2.4s;
-}
-.kite-client .session-heading:has(> .sidebar-actions) > .session-row > svg[role="status"] {
+.kite-client .session-heading:has(> .sidebar-actions) > .session-row > [data-slot="spinner"] {
   order: 1;
   margin-inline: calc((var(--icon-button-size-xs) - var(--ui-icon-size)) / 2);
 }
@@ -2278,7 +2269,7 @@ body {
 .kite-client
   .session-heading:is([data-menu-active], :hover):has(> .sidebar-actions)
   > .session-row
-  > svg[role="status"] {
+  > [data-slot="spinner"] {
   visibility: hidden;
 }
 @media (hover: none) {
@@ -3844,12 +3835,6 @@ body {
 [data-slot="sheet-content"][data-state="closed"] {
   animation: sidebar-sheet-out var(--sidebar-motion-duration) var(--sidebar-motion-easing);
   pointer-events: none;
-}
-@keyframes conversation-loading-shimmer {
-  50% {
-    opacity: 0.55;
-    filter: drop-shadow(0 0 5px currentColor);
-  }
 }
 @keyframes jump-latest-bounce {
   0%,
@@ -9070,9 +9055,10 @@ body {
   color: #dedede;
   font-size: 14px;
 }
-.image-gallery-status > :where(svg) {
-  width: 24px;
-  height: 24px;
+.image-gallery-status > [data-slot="spinner"] {
+  --loading-ring-size: 24px;
+  --loading-ring-track: color-mix(in srgb, currentColor 16%, transparent);
+  --loading-ring-highlight: currentColor;
 }
 .image-gallery-retry {
   min-height: 32px;

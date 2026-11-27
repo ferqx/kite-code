@@ -307,21 +307,6 @@
   border-bottom: 1px solid var(--border);
 }
 
-.workspace-change-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--border);
-  border-top-color: var(--muted-foreground);
-  border-radius: 50%;
-  animation: workspace-change-spin 1s linear infinite;
-}
-
-@keyframes workspace-change-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* Narrow existing sidebars retain file access rather than hiding the tree. */
 @container workspace-changes (width <= 620px) {
   .workspace-changes-body {
@@ -349,12 +334,6 @@
     flex-wrap: wrap;
     gap: 3px 8px;
     padding-inline: 10px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .workspace-change-spinner {
-    animation: none;
   }
 }
 

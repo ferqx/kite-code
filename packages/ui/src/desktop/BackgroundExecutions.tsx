@@ -272,7 +272,7 @@ function ExecutionGroup({
                     onClick={() => onStop(execution)}
                   >
                     {stopping ? (
-                      <Spinner aria-hidden="true" className="motion-reduce:animate-none" />
+                      <Spinner aria-hidden="true" />
                     ) : (
                       <HugeiconsIcon
                         icon={StopIcon}

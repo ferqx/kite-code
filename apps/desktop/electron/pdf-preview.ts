@@ -1,3 +1,4 @@
+import spinnerCss from '@kite-ai/ui/desktop/spinner.css' with { type: 'text' };
 import type { PdfSelection } from '../src/output-files-bridge';
 import { installPageRail } from './document-page-rail';
 import { isolatedOfficeDocumentCss } from './isolated-preview-chrome';
@@ -23,12 +24,10 @@ export function pdfPreviewHtml(pages: number) {
   if (!Number.isSafeInteger(pages) || pages < 1 || pages > 500)
     throw Error('preview_pdf_page_budget');
   const loader = `<style>
-    .pdf-preview-loading{position:fixed;top:calc(50% - 10px);left:calc(50% + 46px);width:20px;height:20px;color:var(--office-muted);pointer-events:none;animation:pdf-preview-spin 1s linear infinite}
-    .pdf-preview-loading[hidden]{display:none}
-    @keyframes pdf-preview-spin{to{transform:rotate(360deg)}}
+    ${spinnerCss}
+    .pdf-preview-loading{position:fixed;top:calc(50% - 10px);left:calc(50% + 46px);--loading-ring-size:20px;--loading-ring-track:var(--office-border);--loading-ring-highlight:var(--office-muted)}
     @media(max-width:599px){.pdf-preview-loading{left:calc(50% + 10px)}}
-    @media(prefers-reduced-motion:reduce){.pdf-preview-loading{animation:none}}
-    </style><svg class="pdf-preview-loading" role="status" aria-label="页面加载中" viewBox="0 0 24 24" hidden><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="44 13"/></svg>`;
+    </style><span class="pdf-preview-loading" data-slot="spinner" role="status" aria-label="页面加载中" hidden></span>`;
   return `<!doctype html><html lang="zh-CN" class="kite-office-preview-document"><meta charset="utf-8"><style>
     ${isolatedOfficeDocumentCss}
     body{margin:0;background:var(--office-background);color:var(--office-foreground);font:13px var(--office-font)}

@@ -1,24 +1,20 @@
-import { LoaderCircleIcon } from '@hugeicons/core-free-icons';
-import { HugeiconsIcon } from '@hugeicons/react';
 import type * as React from 'react';
 
-import { cn } from '../../lib/utils';
-
 function Spinner({
-  className,
-  'aria-label': ariaLabel = 'Loading',
+  size,
+  style,
+  'aria-hidden': ariaHidden,
+  'aria-label': ariaLabel = '加载中',
   ...props
-}: Omit<React.ComponentProps<typeof HugeiconsIcon>, 'icon'>) {
-  return (
-    <HugeiconsIcon
-      icon={LoaderCircleIcon}
-      strokeWidth={2}
-      role="status"
-      aria-label={ariaLabel}
-      className={cn('size-[var(--ui-icon-size,14px)] animate-spin', className)}
-      {...props}
-    />
-  );
+}: React.ComponentProps<'span'> & { size?: number }) {
+  const ringProps = {
+    'data-slot': 'spinner',
+    style: size === undefined ? style : { width: size, height: size, ...style },
+    ...props,
+  };
+  if (ariaHidden === true || ariaHidden === 'true')
+    return <span {...ringProps} aria-hidden="true" />;
+  return <span {...ringProps} role="status" aria-hidden={ariaHidden} aria-label={ariaLabel} />;
 }
 
 export { Spinner };

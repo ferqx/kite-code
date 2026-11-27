@@ -2402,7 +2402,9 @@ test('connection summary waits for first facts and refresh retains the complete 
     await f.render(selected('old'));
     const trigger = f.button('管理 服务一 的模型');
     expect(trigger.disabled).toBe(true);
-    expect(trigger.textContent).toContain('正在读取模型…');
+    expect(
+      trigger.querySelector('[data-slot="spinner"][aria-label="正在读取模型"]'),
+    ).not.toBeNull();
     expect(trigger.textContent).not.toContain('0 个模型');
     await act(async () => initial.resolve(structuredClone(facts)));
     expect(trigger.disabled).toBe(false);

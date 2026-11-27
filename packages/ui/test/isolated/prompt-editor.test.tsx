@@ -542,7 +542,7 @@ test('ordinary file preparation keeps cancellation and send blocking without pro
   const preparation = document.querySelector('[role="status"]')!;
   expect(preparation.getAttribute('aria-label')).toBe('正在添加附件');
   expect(preparation.textContent).toBe('取消添加');
-  expect(preparation.querySelector('.animate-spin')).not.toBeNull();
+  expect(preparation.querySelector('[data-slot="spinner"]')).not.toBeNull();
   expect(document.querySelector<HTMLButtonElement>('[aria-label="发送消息"]')?.disabled).toBe(true);
   const cancel = [...document.querySelectorAll('button')].find(
     (button) => button.textContent === '取消添加',

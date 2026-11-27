@@ -1070,7 +1070,7 @@ test('a failed refresh retires the prior edit and automatic tool observation unt
     expect(button(host, '新增 MCP').disabled).toBe(true);
     expect(button(panel, '启用 Knowledge').disabled).toBe(true);
     expect(calls.filter((input) => input.method === 'settings.userMcp.tools')).toHaveLength(1);
-    expect(panel.textContent).not.toContain('正在加载工具');
+    expect(panel.querySelector('[aria-label="正在加载工具"]')).toBeNull();
     await act(async () => button(panel, '重试').click());
     expect(panel.textContent).toContain('Search knowledge.');
     expect(panel.querySelector('[role="alert"]')).toBeNull();
@@ -1359,7 +1359,11 @@ test.each([
     await act(async () => button(host, '管理 Knowledge').click());
     expect(button(host, 'Refresh MCP settings').disabled).toBe(false);
     await act(async () => button(host, 'Refresh MCP settings').click());
-    expect(panel.querySelector('[aria-label="可用工具"]')?.textContent).toContain('正在加载工具');
+    expect(
+      panel.querySelector(
+        '[aria-label="可用工具"] [data-slot="spinner"][aria-label="正在加载工具"]',
+      ),
+    ).not.toBeNull();
     await act(async () => refreshed.resolve({ ...facts, observationId: 2 }));
     await act(async () => {
       if (outcome === 'success') late.resolve(toolsResult(serverId, 'STALE_TOOL'));

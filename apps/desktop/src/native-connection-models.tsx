@@ -5,6 +5,7 @@ import {
   PopoverContent,
   PopoverTrigger,
   ScrollArea,
+  Spinner,
 } from '@kite-ai/ui/desktop';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { NativeModelSettingsRows, type NativeModelSettingsState } from './native-model-settings';
@@ -66,14 +67,17 @@ export function NativeConnectionModels({
             type="button"
             className="connection-models-trigger"
             aria-label={`管理 ${label} 的模型`}
+            aria-busy={state.reading || undefined}
             disabled={!state.facts}
           >
             <span>
-              {state.facts
-                ? `${models.length} 个模型 · 已启用 ${models.filter((model) => model.enabled).length} 个`
-                : state.reading
-                  ? '正在读取模型…'
-                  : '模型暂不可用'}
+              {state.facts ? (
+                `${models.length} 个模型 · 已启用 ${models.filter((model) => model.enabled).length} 个`
+              ) : state.reading ? (
+                <Spinner aria-label="正在读取模型" />
+              ) : (
+                '模型暂不可用'
+              )}
             </span>
             <span className="connection-models-action">
               管理模型

@@ -8,6 +8,7 @@ import {
   ImageGallery,
   type ImageGalleryItem,
   MessageAttachments,
+  Spinner,
   useConversationReadActive,
   useConversationResourceRetention,
 } from '@kite-ai/ui/desktop';
@@ -394,6 +395,8 @@ function NativeUserImage({
           >
             预览失败，重试
           </Button>
+        ) : loading ? (
+          <Spinner aria-label="加载图片" />
         ) : null}
       </AttachmentMedia>
       <AttachmentTitle className="composer-attachment-name" title={image.name}>
@@ -549,7 +552,9 @@ export function NativePendingAttachments({ files, images }: NativePendingAttachm
             role="img"
             aria-label="图片预览等待消息保存"
             aria-busy="true"
-          />
+          >
+            <Spinner aria-hidden="true" />
+          </AttachmentMedia>
           <AttachmentTitle className="composer-attachment-name" title={image.name}>
             {image.name}
           </AttachmentTitle>

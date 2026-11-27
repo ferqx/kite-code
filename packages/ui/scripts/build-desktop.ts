@@ -94,7 +94,7 @@ const result = await Bun.build({
 });
 if (!result.success) throw new AggregateError(result.logs, 'desktop_ui_build_failed');
 await copyDesktopFileIconAssets(outdir);
-for (const name of ['style.css', 'file-diff.css'])
+for (const name of ['style.css', 'file-diff.css', 'spinner.css'])
   await copyFile(join(source, name), join(outdir, name));
 for (const license of licenses) {
   await mkdir(dirname(license.destination), { recursive: true });

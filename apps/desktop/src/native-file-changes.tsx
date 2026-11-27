@@ -5,6 +5,7 @@ import {
   FileChanges,
   FileDiff,
   ScrollArea,
+  Spinner,
   useConversationReadActive,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useState } from 'react';
@@ -271,7 +272,7 @@ function ChangeDetail({
           )}
         </>
       ) : !disclosure && !displayError ? (
-        <p role="status">正在读取本次{view === 'diff' ? '差异' : '历史版本'}…</p>
+        <Spinner size={16} aria-label={view === 'diff' ? '正在读取本次差异' : '正在读取历史版本'} />
       ) : null}
     </>
   );
