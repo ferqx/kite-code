@@ -1099,21 +1099,11 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       const session = page.getByRole('button', { name: 'Session A', exact: true });
       const current = page.locator('#navigation [aria-current="page"]');
       const transparent = 'rgba(0, 0, 0, 0)';
-      const selectedBackground =
-        theme === 'light' ? 'rgba(0, 0, 0, 0.09)' : 'rgba(255, 255, 255, 0.11)';
-      const hoverBackground =
+      const highlightBackground =
         theme === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.07)';
-      const sidebarBackground = theme === 'light' ? 'rgb(245, 245, 245)' : 'rgb(36, 36, 36)';
-      const tintLayer = (color: string) => `linear-gradient(${color}, ${color})`;
       const expectNavigationBackground = async (target: Locator, color: string) => {
-        await expect(target).toHaveCSS(
-          'background-color',
-          color === transparent ? transparent : sidebarBackground,
-        );
-        await expect(target).toHaveCSS(
-          'background-image',
-          color === transparent ? 'none' : tintLayer(color),
-        );
+        await expect(target).toHaveCSS('background-color', color);
+        await expect(target).toHaveCSS('background-image', 'none');
       };
       const expectPressBackground = async (
         action: Locator,
@@ -1135,12 +1125,17 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       };
       const spaceHeadingRow = page.locator('.space-heading').first();
       const space = spaceHeadingRow.locator('.space-row');
-      await expectPressBackground(space, hoverBackground, transparent, spaceHeadingRow);
+      await expectPressBackground(space, highlightBackground, transparent, spaceHeadingRow);
       const sessionHeading = page.locator('.session-heading').filter({ has: session });
-      await expectPressBackground(session, selectedBackground, selectedBackground, sessionHeading);
+      await expectPressBackground(
+        session,
+        highlightBackground,
+        highlightBackground,
+        sessionHeading,
+      );
       for (const action of [newSession, tasks]) {
         await expectNavigationBackground(action, transparent);
-        await expectPressBackground(action, hoverBackground, transparent);
+        await expectPressBackground(action, highlightBackground, transparent);
       }
       const navigationFrames = await tasks.evaluateHandle((button) => {
         const navigation = button.closest('#navigation')!;
@@ -1169,8 +1164,8 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await expect(page.locator('.scheduled-page')).toBeVisible();
       await page.mouse.move(1100, 650);
       await expect(current).toHaveText('定时任务');
-      await expectNavigationBackground(tasks, selectedBackground);
-      await expectPressBackground(tasks, selectedBackground, selectedBackground);
+      await expectNavigationBackground(tasks, highlightBackground);
+      await expectPressBackground(tasks, highlightBackground, highlightBackground);
 
       await page.getByRole('button', { name: '新建', exact: true }).click();
       const name = page.getByRole('textbox', { name: '名称', exact: true });
@@ -1178,11 +1173,11 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await name.fill('定时任务草稿');
       await expect(name).toBeFocused();
       await expect(current).toHaveText('定时任务');
-      await expectNavigationBackground(tasks, selectedBackground);
+      await expectNavigationBackground(tasks, highlightBackground);
       await page.screenshot({ path: path.join(artifact, `sidebar-${theme}-scheduled-editor.png`) });
       await page.getByRole('button', { name: '取消', exact: true }).click();
       await expect(name).toBeHidden();
-      await expectNavigationBackground(tasks, selectedBackground);
+      await expectNavigationBackground(tasks, highlightBackground);
 
       await session.click();
       await expect(current).toHaveText('Session A');
@@ -1198,8 +1193,8 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       for (const frame of scheduledNavigation) {
         assert.ok(frame.currentCount <= 1);
         if (frame.current) {
-          assert.equal(frame.background, sidebarBackground);
-          assert.equal(frame.tint, tintLayer(selectedBackground));
+          assert.equal(frame.background, highlightBackground);
+          assert.equal(frame.tint, 'none');
         }
       }
 
@@ -1245,12 +1240,23 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await expectNavigationColor(directoryLabels);
       await expect(moreSessions).toHaveCSS('color', navigationColor);
       await expect(emptySpace).toHaveCSS('color', navigationColor);
+      await expectPressBackground(moreSessions, highlightBackground, transparent);
+      await moreSessions.hover();
+      await expectNavigationBackground(moreSessions, highlightBackground);
       await page.locator('#navigation').screenshot({
         path: path.join(artifact, `sidebar-${theme}-navigation-color.png`),
       });
       await moreSessions.click();
       await expect(moreSessions).toBeHidden();
+      await expectNavigationBackground(sessionHeading, highlightBackground);
       await expectNavigationColor(directoryLabels);
+      const unselectedSession = page.locator('.session-heading:not(.selected)').first();
+      await expectPressBackground(
+        unselectedSession.locator('.session-row'),
+        highlightBackground,
+        transparent,
+        unselectedSession,
+      );
 
       const rowStyle = (row: Locator) =>
         row.evaluate((node) => {
@@ -1328,16 +1334,16 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
         .locator('.native-settings-rail section.sidebar-navigation-list')
         .first();
       await expect(settingsGroup).toHaveCSS('row-gap', '2px');
-      await expectNavigationBackground(generalCategory, selectedBackground);
-      await expectPressBackground(generalCategory, selectedBackground, selectedBackground);
-      await expectPressBackground(appearanceCategory, hoverBackground, transparent);
-      await expectNavigationBackground(generalCategory, selectedBackground);
+      await expectNavigationBackground(generalCategory, highlightBackground);
+      await expectPressBackground(generalCategory, highlightBackground, highlightBackground);
+      await expectPressBackground(appearanceCategory, highlightBackground, transparent);
+      await expectNavigationBackground(generalCategory, highlightBackground);
       await appearanceCategory.click();
       await expect(appearanceCategory).toHaveAttribute('aria-pressed', 'true');
-      await expectNavigationBackground(appearanceCategory, selectedBackground);
+      await expectNavigationBackground(appearanceCategory, highlightBackground);
       await expectNavigationBackground(generalCategory, transparent);
       await page.mouse.move(1100, 650);
-      await expectNavigationBackground(appearanceCategory, selectedBackground);
+      await expectNavigationBackground(appearanceCategory, highlightBackground);
       await expectNavigationColor(settingsLabels);
       await expectNavigationColor(settingsHeadings, headingColor);
       await page.locator('.native-settings-rail').screenshot({
@@ -1349,7 +1355,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await expect(settingsBack).toHaveCSS('color', navigationColor);
       await settingsBack.click();
       await expect(appearanceCategory).toBeFocused();
-      await expectNavigationBackground(appearanceCategory, selectedBackground);
+      await expectNavigationBackground(appearanceCategory, highlightBackground);
       await expectNavigationColor(settingsLabels);
       await expectNavigationColor(settingsHeadings, headingColor);
       await expectCenteredNavigation(settingsActions);

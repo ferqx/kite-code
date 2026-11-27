@@ -513,7 +513,7 @@ body {
     font-weight: 400;
   }
   .sidebar-navigation-row {
-    --control-pressed: var(--navigation-hover-background);
+    --control-pressed: var(--control-hover);
     width: 100%;
     padding: 6px 10px;
     justify-content: flex-start;
@@ -528,8 +528,11 @@ body {
   .sidebar-sessions .empty-list {
     color: var(--navigation-foreground);
   }
-  .sidebar-navigation-row:hover:where(:not(:disabled), [data-read-gated="true"]) {
-    background: var(--navigation-hover-background);
+  .sidebar-navigation-row:hover:where(:not(:disabled), [data-read-gated="true"]),
+  .primary-navigation .sidebar-navigation-row.selected,
+  .sidebar-navigation-action.scheduled-tasks-navigation[aria-current="page"],
+  .sidebar-navigation-action[aria-pressed="true"] {
+    background: var(--control-hover);
   }
   .primary-navigation .new-session:disabled:not([data-read-gated="true"]) {
     opacity: 1;
@@ -542,12 +545,6 @@ body {
   }
   .sidebar-navigation-action {
     transition: none;
-  }
-  .primary-navigation .sidebar-navigation-row.selected,
-  .sidebar-navigation-action.scheduled-tasks-navigation[aria-current="page"],
-  .sidebar-navigation-action[aria-pressed="true"] {
-    --control-pressed: var(--navigation-selected-background);
-    background: var(--navigation-selected-background);
   }
   .sidebar-navigation-heading {
     display: flex;
@@ -2201,14 +2198,12 @@ body {
 }
 .kite-client
   :is(.space-heading, .session-heading):is(
+    .selected,
     [data-menu-active],
     :hover,
     :has(:where(.button:active:is(:not(:disabled), [data-read-gated="true"])))
   ) {
-  background: var(--navigation-hover-background);
-}
-.kite-client :is(.space-heading, .session-heading).selected {
-  background: var(--navigation-selected-background);
+  background: var(--control-hover);
 }
 .kite-client
   :is(.space-heading, .session-heading)

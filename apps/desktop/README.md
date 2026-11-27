@@ -889,14 +889,14 @@ Native消费[UI共享语义色](../../packages/ui/README.md#原桌面展示层)�
 
 2026-11-01，设置分类恢复持续选中高亮：Windows x64／Electron44.3.0、独立Profile及普通生产renderer实际核常规、MCP、Skills、提供商与模型四项，鼠标移开后仍只有当前项保留底色；Tab把焦点移到Skills时仍保留MCP选中，Enter后选中转到Skills，键盘焦点环保持，返回原页面正常。零模型请求，窗口正常退出0，5个所属进程全部结束。本轮仅改CSS及当前文档，未改页面状态或TypeScript；原窗口动作DOM结果沿用前轮，CSS Biome与文档检查通过，不扩展安装或其他平台资格。本机原始证据已缺失。
 
-Native 的[普通设置样式](src/native-tailwind.css)与[提供商／MCP／Skills 列表](src/native-provider-settings.css)消费 [UI owner 的中性交互变量](../../packages/ui/README.md#原桌面展示层)，顶栏菜单与设置内容沿用默认的悬停／选中／按下分级；设置返回与 `.settings-sidebar` 将按下变量局部映射到悬停值，与共享侧栏保持一致。设置左栏与主页面复用 [导航组件](../../packages/ui/src/desktop/SidebarNavigationAction.tsx) 的列表、分组标题和行控件。设置标题、分组、类别及返回控件共用 `--navigation-foreground`。主侧栏的空间、会话、定时任务与设置分类共用悬停、按下和选中底色，以及原生按钮焦点反馈。行高亮以主题侧栏色为底合成，玻璃与实色上的颜色一致。窄窗从内容返回分类时，焦点回到当前分类。Tailwind 的 `--color-accent` 映射到 `--control-hover`，使移出页面树的菜单也遵循同一规则。原 `--accent` 继续服务静态内容，不随交互高亮调整。实色主操作保留原角色配色，禁用状态和键盘焦点沿原控件语义。
+Native 的[普通设置样式](src/native-tailwind.css)与[提供商／MCP／Skills 列表](src/native-provider-settings.css)消费 [UI owner 的中性交互变量](../../packages/ui/README.md#原桌面展示层)，顶栏菜单与设置内容沿用默认的悬停／选中／按下分级；设置返回与 `.settings-sidebar` 将按下变量局部映射到悬停值，与共享侧栏保持一致。设置左栏与主页面复用 [导航组件](../../packages/ui/src/desktop/SidebarNavigationAction.tsx) 的列表、分组标题和行控件。设置标题、分组、类别及返回控件共用 `--navigation-foreground`。主侧栏的空间、会话、定时任务与设置分类共用悬停、按下和选中底色，以及原生按钮焦点反馈。行高亮使用主题的半透明颜色，随所在侧栏的底色合成。窄窗从内容返回分类时，焦点回到当前分类。Tailwind 的 `--color-accent` 映射到 `--control-hover`，使移出页面树的菜单也遵循同一规则。原 `--accent` 继续服务静态内容，不随交互高亮调整。实色主操作保留原角色配色，禁用状态和键盘焦点沿原控件语义。
 
 2026-11-24，Windows x64／Chromium 157 的[生产渲染器侧栏回归](test/isolated/sidebar-actions-browser.test.ts)在深浅主题下核对两处列表的分组、行高、字号、圆角、间距和文字色。操作覆盖展开更多、切换设置分类、窄窗返回分类与关闭设置，当前分类底色、键盘焦点和原会话草稿符合预期，两个主题均无页面异常。带 Windows Mica 标记的浏览器夹具中，两处侧栏的内边距均为 6px，导航文字起点距栏边均为 40px。
 同日沿同一回归验证悬停。深浅主题下，新对话、定时任务和设置分类的悬停底色与空间行一致，移开鼠标后当前项保持选中，其他项恢复普通底色。
 
 主视图的侧栏容器原先把按下底色映射为悬停色，独立设置视图使用普通按钮的默认按下色。把该规则归到共享导航行后，实际鼠标按住、移开再松开的浏览器回归通过。Windows Electron 的两个生产渲染器在深浅主题下核对未选中与已选中的默认、悬停、按下和键盘焦点样式，结果一致。前后对照位于该组原始记录。
 
-设置导航与空间及会话整行共用悬停和选中颜色。选中使用独立叠层，悬停、按下和选中都以同一主题侧栏色合成。Windows Electron 的独立视图截图采样确认，浅色两处的悬停／选中分别为 RGB 232／223，深色分别为 RGB 51／60。浏览器回归另核鼠标移入、按住、移开及设置分类切换和会话返回后的底色。
+设置导航与主侧栏行共用「展开更多」的悬停底色，按下和选中也使用该底色。[侧栏浏览器回归](test/isolated/sidebar-actions-browser.test.ts)在深浅主题下核对鼠标移入、按住、移开、展开更多、设置分类切换及会话返回后的底色。
 
 浏览器回归比较每行图标框、文字行框与按钮的垂直中心，也覆盖窄窗返回分类。旧的 Chromium 样本用于核对布局中心，实际设置 WebContentsView 中的可见对齐另按 Electron 截图核对。
 
