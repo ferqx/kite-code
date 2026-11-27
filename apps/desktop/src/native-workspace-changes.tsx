@@ -1,7 +1,16 @@
-import { Button, FileDiff } from '@kite-ai/ui/desktop';
+import {
+  Badge,
+  Button,
+  FileDiff,
+  FileTree,
+  FileTreeFile,
+  FileTreeFolder,
+  Input,
+} from '@kite-ai/ui/desktop';
 import {
   type CSSProperties,
   type KeyboardEvent,
+  type ReactNode,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -14,8 +23,7 @@ import {
   filterWorkspaceChanges,
   visibleWorkspaceTreeRows,
   WORKSPACE_FILTER_LIMIT,
-  WORKSPACE_TREE_PAGE_SIZE,
-  type WorkspaceChangeTreeNode,
+  type WorkspaceChangeTreeRow,
   workspaceChangeStatus,
   workspaceChangeTree,
   workspacePathLabel,
@@ -55,6 +63,7 @@ function WorkspaceChangeDetail({
   observationId,
   refreshing,
   listFailed,
+  onClose,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -64,6 +73,7 @@ function WorkspaceChangeDetail({
   observationId: string;
   refreshing: boolean;
   listFailed: boolean;
+  onClose: () => void;
 }) {
   const [body, setBody] = useState<NativeWorkspaceChangeDetail>();
   const [error, setError] = useState('');
@@ -99,9 +109,7 @@ function WorkspaceChangeDetail({
       })
       .catch((cause) => {
         if (active)
-          setError(
-            workspaceReadError(cause, '无法读取当前差异，文件可能已变化。请刷新列表后重试。'),
-          );
+          setError(workspaceReadError(cause, '无法读取当前差异，请重新打开「变更」重试。'));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -111,37 +119,79 @@ function WorkspaceChangeDetail({
       void bridge.request({ method: 'workspaceChanges.close', generation, readId }).catch(() => {});
     };
   }, [bridge, generation, entry.changeId, observationId, refreshing, listFailed]);
-  if (listFailed && !body)
-    return (
-      <p className="workspace-change-notice" role="alert">
-        无法读取当前差异，请刷新变更列表后重试。
-      </p>
-    );
-  if (error && !body)
-    return (
-      <p className="workspace-change-notice" role="alert">
-        {error}
-      </p>
-    );
-  if (!body)
-    return (
-      <div
-        className="workspace-change-empty"
-        role="status"
-        aria-label="正在读取当前差异"
-        aria-busy="true"
-      >
-        <span className="workspace-change-spinner" />
+  const separator = entry.path.lastIndexOf('/');
+  const folder = separator === -1 ? '' : entry.path.slice(0, separator);
+  const header = {
+    title: (
+      <div className="workspace-change-file-heading" title={workspacePathLabel(entry.path, 1_024)}>
+        <span className="workspace-change-file-icon" aria-hidden="true" />
+        <div className="workspace-change-file-label">
+          <strong>{workspacePathLabel(entry.path.slice(separator + 1))}</strong>
+          <div className="workspace-change-file-meta">
+            {folder && <span>{workspacePathLabel(folder)}</span>}
+            <span>{workspaceChangeStatus(entry)}</span>
+          </div>
+          {entry.oldPath && (
+            <span
+              className="workspace-change-rename"
+              title={workspacePathLabel(entry.oldPath, 1_024)}
+            >
+              原路径 {workspacePathLabel(entry.oldPath)}
+            </span>
+          )}
+        </div>
       </div>
+    ),
+    action: (
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="workspace-change-clear"
+        aria-label="关闭当前文件差异"
+        title="关闭当前文件差异"
+        onClick={onClose}
+      >
+        ×
+      </Button>
+    ),
+  };
+  const standaloneHeader = (
+    <div className="workspace-change-file-bar">
+      {header.title}
+      {header.action}
+    </div>
+  );
+  if (!body) {
+    const unavailable = listFailed ? '无法读取当前差异，请重新打开「变更」重试。' : error;
+    return (
+      <>
+        {standaloneHeader}
+        {unavailable ? (
+          <p className="workspace-change-notice" role="alert">
+            {unavailable}
+          </p>
+        ) : (
+          <div
+            className="workspace-change-empty"
+            role="status"
+            aria-label="正在读取当前差异"
+            aria-busy="true"
+          >
+            <span className="workspace-change-spinner" />
+          </div>
+        )}
+      </>
     );
+  }
   const reasons = {
     binary: '二进制文件不显示文本差异。',
     too_large: '文件过大，未加载完整差异。请在本地 Git 工具中查看。',
     unsupported: '此文件类型或仓库状态不支持文本预览。',
-    unavailable: '差异目前不可读，请刷新后重试。',
+    unavailable: '差异目前不可读，请重新打开「变更」重试。',
   };
   return (
     <>
+      {!body.text && standaloneHeader}
       {error && (
         <p className="workspace-change-notice" role="alert">
           {error} 当前显示上次读取的内容。
@@ -151,11 +201,6 @@ function WorkspaceChangeDetail({
         className="workspace-change-live-body"
         aria-busy={(!listFailed && (refreshing || loading)) || undefined}
       >
-        {!body.text && (
-          <div className="workspace-change-path" title={workspacePathLabel(entry.path, 1_024)}>
-            {workspacePathLabel(entry.path)}
-          </div>
-        )}
         {body.reason && (
           <p className="workspace-change-notice" role="status">
             {reasons[body.reason]}
@@ -172,6 +217,7 @@ function WorkspaceChangeDetail({
             scope="workspace"
             layout={layout}
             onLayoutChange={onLayoutChange}
+            header={header}
             message={{
               id: entry.path,
               role: 'tool',
@@ -219,70 +265,47 @@ function WorkspaceChangeBrowser({
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [focusedId, setFocusedId] = useState<string>();
-  const pendingFocus = useRef<string | undefined>(undefined);
   const treeRef = useRef<HTMLDivElement>(null);
   const boundedPage = useMemo(() => boundedWorkspaceChanges(page.entries), [page.entries]);
   const entries = boundedPage.entries;
   const filtered = useMemo(() => filterWorkspaceChanges(entries, query), [entries, query]);
   const tree = useMemo(() => workspaceChangeTree(filtered), [filtered]);
   const rows = useMemo(() => visibleWorkspaceTreeRows(tree.nodes, collapsed), [tree, collapsed]);
-  const [pageIndex, setPageIndex] = useState(() =>
-    Math.floor(
-      Math.max(
-        0,
-        rows.findIndex(({ node }) => node.kind === 'file' && node.entry.path === selectedPath),
-      ) / WORKSPACE_TREE_PAGE_SIZE,
-    ),
-  );
-  const pageCount = Math.max(1, Math.ceil(rows.length / WORKSPACE_TREE_PAGE_SIZE));
-  const currentPage = Math.min(pageIndex, pageCount - 1);
-  const visibleRows = rows.slice(
-    currentPage * WORKSPACE_TREE_PAGE_SIZE,
-    (currentPage + 1) * WORKSPACE_TREE_PAGE_SIZE,
-  );
-  const activeFocus = visibleRows.some(({ node }) => node.id === focusedId)
-    ? focusedId
-    : visibleRows[0]?.node.id;
+  const rowsByParent = useMemo(() => {
+    const groups = new Map<string | undefined, WorkspaceChangeTreeRow[]>();
+    for (const row of rows) {
+      const parent = row.node.parentId;
+      const group = groups.get(parent);
+      if (group) group.push(row);
+      else groups.set(parent, [row]);
+    }
+    return groups;
+  }, [rows]);
+  const activeFocus = rows.some(({ node }) => node.id === focusedId) ? focusedId : rows[0]?.node.id;
   const selected = filtered.find((entry) => entry.path === selectedPath);
   const truncated = page.truncated || boundedPage.truncated;
-  const previousViewport = useRef<{ page: number; query: string } | undefined>(undefined);
   useLayoutEffect(() => {
-    if (
-      previousViewport.current?.page !== currentPage ||
-      previousViewport.current?.query !== query
-    ) {
-      if (treeRef.current) treeRef.current.scrollTop = 0;
-      previousViewport.current = { page: currentPage, query };
-    }
-  }, [currentPage, query]);
-  useLayoutEffect(() => {
-    if (!pendingFocus.current) return;
-    const target = [
-      ...(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? []),
-    ].find((node) => node.dataset.treeId === pendingFocus.current);
-    if (target) {
-      target.focus();
-      target.scrollIntoView({ block: 'nearest' });
-      pendingFocus.current = undefined;
-    }
-  });
+    treeRef.current
+      ?.querySelector('[role="treeitem"][aria-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest' });
+  }, []);
   function focusRow(index: number) {
     const row = rows[Math.max(0, Math.min(index, rows.length - 1))];
     if (!row) return;
-    pendingFocus.current = row.node.id;
-    setFocusedId(row.node.id);
-    setPageIndex(
-      Math.floor(Math.max(0, Math.min(index, rows.length - 1)) / WORKSPACE_TREE_PAGE_SIZE),
-    );
+    const target = Array.from(
+      treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [],
+    ).find((item) => item.dataset.treeId === row.node.id);
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: 'nearest' });
   }
-  function toggleDirectory(node: WorkspaceChangeTreeNode) {
+  function setDirectoryOpen(id: string, open: boolean) {
     setCollapsed((previous) => {
       const next = new Set(previous);
-      if (next.has(node.id)) next.delete(node.id);
-      else next.add(node.id);
+      if (open) next.delete(id);
+      else next.add(id);
       return next;
     });
-    setFocusedId(node.id);
+    setFocusedId(id);
   }
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const index = rows.findIndex(({ node }) => node.id === activeFocus);
@@ -294,10 +317,10 @@ function WorkspaceChangeBrowser({
     else if (event.key === 'End') focusRow(rows.length - 1);
     else if (event.key === 'ArrowRight') {
       if (node.kind !== 'directory') return;
-      if (collapsed.has(node.id)) toggleDirectory(node);
+      if (collapsed.has(node.id)) setDirectoryOpen(node.id, true);
       else focusRow(index + 1);
     } else if (event.key === 'ArrowLeft') {
-      if (node.kind === 'directory' && !collapsed.has(node.id)) toggleDirectory(node);
+      if (node.kind === 'directory' && !collapsed.has(node.id)) setDirectoryOpen(node.id, false);
       else if (node.parentId) focusRow(rows.findIndex((row) => row.node.id === node.parentId));
     } else return;
     event.preventDefault();
@@ -305,56 +328,87 @@ function WorkspaceChangeBrowser({
   function changeFilter(value: string) {
     const nextQuery = value.slice(0, WORKSPACE_FILTER_LIMIT);
     onQueryChange(nextQuery);
-    setPageIndex(0);
+    if (treeRef.current) treeRef.current.scrollTop = 0;
     setFocusedId(undefined);
     // Search results are immediately reachable even if their parent was previously folded.
     setCollapsed(new Set());
     if (selected && !filterWorkspaceChanges([selected], nextQuery).length) onSelectPath(undefined);
   }
+  function renderTreeRows(parentId?: string): ReactNode {
+    return rowsByParent.get(parentId)?.map(({ node, level, position, size }) => {
+      const rowProps = {
+        className: 'workspace-change-tree-row',
+        label: node.label,
+        'data-tree-id': node.id,
+        style: { '--tree-level': Math.min(level - 1, 6) } as CSSProperties,
+        'aria-level': level,
+        'aria-posinset': position,
+        'aria-setsize': size,
+        tabIndex: node.id === activeFocus ? 0 : -1,
+        title: node.title,
+        onFocus: () => setFocusedId(node.id),
+      };
+      if (node.kind === 'directory')
+        return (
+          <FileTreeFolder
+            key={node.id}
+            {...rowProps}
+            path={node.title}
+            aria-label={node.title}
+            open={!collapsed.has(node.id)}
+            onOpenChange={(open) => setDirectoryOpen(node.id, open)}
+          >
+            {renderTreeRows(node.id)}
+          </FileTreeFolder>
+        );
+      const { entry } = node;
+      const status = workspaceChangeStatus(entry);
+      const indexMarker =
+        entry.untracked && entry.indexStatus !== 'D' ? '' : entry.indexStatus.trim();
+      const worktreeMarker = entry.untracked ? 'U' : entry.worktreeStatus.trim();
+      return (
+        <FileTreeFile
+          key={node.id}
+          {...rowProps}
+          path={entry.path}
+          data-change-id={workspacePathLabel(entry.changeId, 1_024)}
+          aria-selected={selected?.changeId === entry.changeId}
+          aria-label={`${node.title}，${status}`}
+          onClick={() => onSelectPath(entry.path)}
+        >
+          <Badge className="workspace-change-tree-status" aria-hidden="true" title={status}>
+            {indexMarker && <span data-git-status={indexMarker}>{indexMarker}</span>}
+            {indexMarker && worktreeMarker && ', '}
+            {worktreeMarker && (
+              <span data-git-status={entry.untracked ? 'untracked' : worktreeMarker}>
+                {worktreeMarker}
+              </span>
+            )}
+          </Badge>
+        </FileTreeFile>
+      );
+    });
+  }
   return (
     <div className="workspace-changes-body">
       <section className="workspace-change-editor" aria-label="选中文件差异">
         {selected ? (
-          <>
-            <div className="workspace-change-status">
-              <span>{workspaceChangeStatus(selected)}</span>
-              {selected.oldPath && (
-                <span
-                  className="workspace-change-rename"
-                  title={workspacePathLabel(`${selected.oldPath} → ${selected.path}`, 1_024)}
-                >
-                  重命名：{workspacePathLabel(selected.oldPath)} →{' '}
-                  {workspacePathLabel(selected.path)}
-                </span>
-              )}
-              <button
-                type="button"
-                className="workspace-change-clear"
-                aria-label="关闭当前文件差异"
-                onClick={() => onSelectPath(undefined)}
-              >
-                ×
-              </button>
-            </div>
-            <div className="workspace-change-preview">
-              <WorkspaceChangeDetail
-                key={selected.path}
-                bridge={bridge}
-                generation={generation}
-                entry={selected}
-                layout={layout}
-                onLayoutChange={onLayoutChange}
-                observationId={page.readId}
-                refreshing={refreshing}
-                listFailed={listFailed}
-              />
-            </div>
-          </>
+          <div className="workspace-change-preview">
+            <WorkspaceChangeDetail
+              key={selected.path}
+              bridge={bridge}
+              generation={generation}
+              entry={selected}
+              layout={layout}
+              onLayoutChange={onLayoutChange}
+              observationId={page.readId}
+              refreshing={refreshing}
+              listFailed={listFailed}
+              onClose={() => onSelectPath(undefined)}
+            />
+          </div>
         ) : (
           <div className="workspace-change-empty">
-            <span className="workspace-change-empty-icon" aria-hidden="true">
-              ±
-            </span>
             <p>
               {entries.length
                 ? '选择文件查看差异'
@@ -362,15 +416,14 @@ function WorkspaceChangeBrowser({
                   ? '未取得可展示文件，请在本地 Git 工具中查看。'
                   : '本次读取未发现已暂存、未暂存或未跟踪文件。'}
             </p>
-            {entries.length > 0 && <span>只读取选中文件的当前内容</span>}
           </div>
         )}
       </section>
       <aside className="workspace-change-files" aria-label="变更文件导航">
         <div className="workspace-change-files-header">
-          <label className="workspace-change-filter">
-            <span aria-hidden="true">⌕</span>
-            <input
+          <div className="workspace-change-filter">
+            <span className="workspace-change-search-icon" aria-hidden="true" />
+            <Input
               type="search"
               aria-label="筛选文件"
               placeholder="筛选文件…"
@@ -378,9 +431,8 @@ function WorkspaceChangeBrowser({
               maxLength={WORKSPACE_FILTER_LIMIT}
               onInput={(event) => changeFilter(event.currentTarget.value)}
             />
-          </label>
+          </div>
           <div className="workspace-change-files-title">
-            <strong>已更改的文件</strong>
             <span>
               {query.trim() ? `${filtered.length} / ` : ''}
               {entries.length}
@@ -388,94 +440,19 @@ function WorkspaceChangeBrowser({
             </span>
           </div>
         </div>
-        <div
+        <FileTree
           className="workspace-change-tree"
-          role="tree"
           aria-label="变更文件"
           ref={treeRef}
           onKeyDown={handleKeyDown}
         >
-          {visibleRows.map(({ node, level, position, size }) => (
-            <button
-              type="button"
-              role="treeitem"
-              key={node.id}
-              className={`workspace-change-tree-row ${node.kind === 'file' ? 'workspace-change-tree-file' : 'workspace-change-tree-directory'}`}
-              data-tree-id={node.id}
-              data-change-id={
-                node.kind === 'file' ? workspacePathLabel(node.entry.changeId, 1_024) : undefined
-              }
-              style={{ '--tree-level': Math.min(level - 1, 8) } as CSSProperties}
-              aria-level={level}
-              aria-posinset={position}
-              aria-setsize={size}
-              aria-expanded={node.kind === 'directory' ? !collapsed.has(node.id) : undefined}
-              aria-selected={
-                node.kind === 'file' ? selected?.changeId === node.entry.changeId : undefined
-              }
-              aria-label={
-                node.kind === 'file'
-                  ? `${node.title}，${workspaceChangeStatus(node.entry)}`
-                  : node.title
-              }
-              tabIndex={node.id === activeFocus ? 0 : -1}
-              title={node.title}
-              onFocus={() => setFocusedId(node.id)}
-              onClick={() =>
-                node.kind === 'directory' ? toggleDirectory(node) : onSelectPath(node.entry.path)
-              }
-            >
-              <span className="workspace-change-tree-glyph" aria-hidden="true">
-                {node.kind === 'directory' ? (collapsed.has(node.id) ? '›' : '⌄') : '≡'}
-              </span>
-              <span className="workspace-change-tree-name">{node.label}</span>
-              {node.kind === 'file' && (
-                <span
-                  className="workspace-change-tree-status"
-                  title={workspaceChangeStatus(node.entry)}
-                >
-                  {node.entry.untracked
-                    ? node.entry.indexStatus === 'D'
-                      ? 'D?'
-                      : '?'
-                    : `${node.entry.indexStatus}${node.entry.worktreeStatus}`.trim()}
-                </span>
-              )}
-            </button>
-          ))}
+          {renderTreeRows()}
           {!filtered.length && entries.length > 0 && (
             <p className="workspace-change-no-match" role="status">
               没有匹配的变更文件
             </p>
           )}
-        </div>
-        {pageCount > 1 && (
-          <nav className="workspace-change-pagination" aria-label="文件树分页">
-            <button
-              type="button"
-              disabled={currentPage === 0}
-              onClick={() => {
-                setPageIndex(currentPage - 1);
-                setFocusedId(undefined);
-              }}
-            >
-              上一页
-            </button>
-            <span>
-              {currentPage + 1} / {pageCount}
-            </span>
-            <button
-              type="button"
-              disabled={currentPage === pageCount - 1}
-              onClick={() => {
-                setPageIndex(currentPage + 1);
-                setFocusedId(undefined);
-              }}
-            >
-              下一页
-            </button>
-          </nav>
-        )}
+        </FileTree>
         {tree.simplified && (
           <p className="workspace-change-tree-notice" role="status">
             部分目录已简化为相对路径，所有已加载文件仍可筛选和查看。
@@ -549,7 +526,7 @@ function WorkspaceChangesView({
     error?: string;
     loading: boolean;
   }>({ bridge, loading: true });
-  const refreshRequest = useRef<((delay?: number) => void) | undefined>(undefined);
+  const refreshRequest = useRef<(() => void) | undefined>(undefined);
   useEffect(() => {
     let active = true;
     let pending = false;
@@ -660,10 +637,7 @@ function WorkspaceChangesView({
             ...previous,
             bridge,
             loading: false,
-            error: workspaceReadError(
-              cause,
-              '无法确认工作区变更，请刷新重试。读取失败不表示没有改动。',
-            ),
+            error: workspaceReadError(cause, '无法确认工作区变更，请重新打开「变更」重试。'),
           }));
         }
       } finally {
@@ -737,25 +711,7 @@ function WorkspaceChangesView({
       <header className="workspace-changes-toolbar">
         <strong>工作区变更</strong>
         <span className="workspace-changes-baseline">当前内容 ↔ HEAD</span>
-        <Button
-          className="ghost workspace-changes-refresh"
-          disabled={current.loading}
-          onClick={() => refreshRequest.current?.(0)}
-        >
-          刷新变更
-        </Button>
       </header>
-      <div className="workspace-changes-scope">
-        <span>整个仓库 · 不代表 Agent 的贡献</span>
-        <details>
-          <summary>范围说明</summary>
-          <p>
-            整个仓库的当前内容相对
-            HEAD（当前分支末次提交，无提交时与空树比较）。包含已暂存、未暂存和未跟踪文件。子模块内部改动不在此列表中；请在子模块的
-            Git 工具中查看。
-          </p>
-        </details>
-      </div>
       {current.loading && !current.page && (
         <div
           className="workspace-change-empty"

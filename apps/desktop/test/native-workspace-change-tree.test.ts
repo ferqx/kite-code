@@ -114,7 +114,7 @@ test('staged removal plus untracked working copy retains both status facts', () 
       worktreeStatus: '?',
       untracked: true,
     }),
-  ).toBe('已暂存 D / 当前文件未跟踪');
+  ).toBe('已暂存删除 · 当前文件未跟踪');
   expect(
     workspaceChangeStatus({
       ...change('file'),

@@ -1,6 +1,5 @@
 import type { NativeWorkspaceChange } from './workspace-changes-bridge';
 
-export const WORKSPACE_TREE_PAGE_SIZE = 50;
 export const WORKSPACE_CHANGE_LIMIT = 1_000;
 export const WORKSPACE_METADATA_BYTE_LIMIT = 512 * 1_024;
 export const WORKSPACE_TREE_DEPTH_LIMIT = 24;
@@ -53,20 +52,37 @@ export function boundedWorkspaceChanges(entries: readonly NativeWorkspaceChange[
   return { entries: bounded, truncated: bounded.length < entries.length };
 }
 
+const changeStatusLabels = new Map([
+  ['A', '新增'],
+  ['C', '复制'],
+  ['D', '删除'],
+  ['M', '修改'],
+  ['R', '重命名'],
+  ['T', '类型变更'],
+]);
+
+const conflictStatusLabels = new Map([
+  ['AA', '双方均新增'],
+  ['AU', '本方新增'],
+  ['DD', '双方均删除'],
+  ['DU', '本方删除'],
+  ['UA', '对方新增'],
+  ['UD', '对方删除'],
+  ['UU', '双方均修改'],
+]);
+
 export function workspaceChangeStatus(entry: NativeWorkspaceChange): string {
-  if (entry.untracked) return entry.indexStatus === 'D' ? '已暂存 D / 当前文件未跟踪' : '未跟踪';
-  if (
-    entry.indexStatus === 'U' ||
-    entry.worktreeStatus === 'U' ||
-    ['AA', 'DD'].includes(entry.indexStatus + entry.worktreeStatus)
-  )
-    return `冲突 ${entry.indexStatus}${entry.worktreeStatus}`;
+  if (entry.untracked) return entry.indexStatus === 'D' ? '已暂存删除 · 当前文件未跟踪' : '未跟踪';
+  const conflict = conflictStatusLabels.get(entry.indexStatus + entry.worktreeStatus);
+  if (conflict) return `冲突 · ${conflict}`;
+  if (entry.indexStatus === 'U' || entry.worktreeStatus === 'U') return '冲突';
   return [
-    entry.indexStatus !== ' ' && `已暂存 ${entry.indexStatus}`,
-    entry.worktreeStatus !== ' ' && `未暂存 ${entry.worktreeStatus}`,
+    entry.indexStatus !== ' ' && `已暂存${changeStatusLabels.get(entry.indexStatus) ?? '变更'}`,
+    entry.worktreeStatus !== ' ' &&
+      `未暂存${changeStatusLabels.get(entry.worktreeStatus) ?? '变更'}`,
   ]
     .filter(Boolean)
-    .join(' / ');
+    .join(' · ');
 }
 
 export type WorkspaceChangeTreeNode = {

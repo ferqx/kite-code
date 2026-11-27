@@ -68,6 +68,7 @@ test('native builds retain fixed renderer entries while development uses only Vi
           'session-search-renderer.js',
           'settings.html',
           'settings-renderer.js',
+          'file-tree-icons',
         ])
           expect(existsSync(join(output, file))).toBe(false);
         continue;
@@ -116,6 +117,12 @@ test('native builds retain fixed renderer entries while development uses only Vi
       expect(css).toContain('background:transparent');
       expect(readFileSync(join(output, 'index.html'), 'utf8')).toContain('./renderer.js');
       expect(existsSync(join(output, 'renderer.js'))).toBe(true);
+      for (const icon of ['typescript-def.svg', 'folder-gh-workflows-open.svg', 'bun_light.svg']) {
+        expect(readFileSync(join(output, 'file-tree-icons', icon), 'utf8')).toContain('<svg');
+      }
+      expect(readFileSync(join(output, 'file-tree-icons', 'LICENSE'), 'utf8')).toContain(
+        'MIT License',
+      );
       // Fixed confirmations also avoid the unrelated conversation parser closure.
       const dialog = readFileSync(join(output, 'global-dialog-renderer.js'), 'utf8');
       expect(Buffer.byteLength(dialog)).toBeLessThan(500_000);

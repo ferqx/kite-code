@@ -23,11 +23,18 @@ const patch = [
   ...Array.from({ length: 1000 }, (_, i) => `${1524 + i} +synthetic line ${i}`),
 ].join('\n');
 const workspacePatch = [
+  'diff --git a/src/example.ts b/src/example.ts',
+  'index 89bd4e2..c6e01e9 100644',
+  '--- a/src/example.ts',
+  '+++ b/src/example.ts',
   '@@ -1,31 +1,31 @@',
   ...Array.from({ length: 15 }, (_, i) => ` const retained${i} = ${i};`),
   '-const value = "before";',
   '+const value = "CURRENT WORKSPACE ONLY";',
   ...Array.from({ length: 15 }, (_, i) => ` const tail${i} = ${i};`),
+  '@@ -410 +410 @@',
+  `-const prior = "${'keep both versions readable '.repeat(10)}";`,
+  `+const next = "${'长行仍在各自的栏内换行 '.repeat(10)}";`,
 ].join('\n');
 const bridge: NativeBridge = {
   watch: () => () => {},
@@ -88,6 +95,34 @@ const bridge: NativeBridge = {
             worktreeStatus: '?',
             untracked: true,
           },
+          ...[
+            'src/components/WorkspaceFileList.tsx',
+            'src/components/WorkspaceFileRow.tsx',
+            'src/styles/workspace.css',
+            'src/styles/tokens.css',
+            'docs/notes/workspace-diff-behavior.md',
+            'test/fixtures/example-repository/config.json',
+            'test/workspace-refresh.test.ts',
+            'Dockerfile',
+            'bun.lock',
+            '.gitignore',
+            '.config/graphqlrc.json',
+            '.github/workflows/ci.yml',
+            'notes/roadmap.pdf',
+            'src/types.d.ts',
+            'scripts/release.go',
+            'src/backend.rs',
+            'photo.png',
+            'archive.zip',
+            'unknown.kite-fixture',
+            ...Array.from({ length: 56 }, (_, index) => `fixtures/file-${index}.ts`),
+          ].map((path, index) => ({
+            changeId: `other-${index}-${request.readId}`,
+            path,
+            indexStatus: index === 0 ? 'A' : ' ',
+            worktreeStatus: index === 6 ? 'D' : 'M',
+            untracked: false,
+          })),
         ],
       };
     }

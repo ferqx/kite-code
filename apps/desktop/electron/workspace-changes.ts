@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants, watch } from 'node:fs';
 import { copyFile, lstat, mkdir, mkdtemp, open, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Workspace } from '@kite-ai/client';
 import type {
@@ -341,13 +341,61 @@ export class NativeWorkspaceChanges {
     const filters = await this.git(
       lease,
       root,
-      ['config', '--null', '--get-regexp', '^filter\\..*\\.(clean|process)$'],
+      [
+        'config',
+        '--show-scope',
+        '--name-only',
+        '--null',
+        '--get-regexp',
+        '^filter\\..*\\.(clean|process)$',
+      ],
       65536,
       true,
     );
-    if (filters.truncated || filters.code === 0)
+    if (filters.truncated) throw Error('workspace_changes_filters_unsupported');
+    if (filters.code === 1) return false;
+    if (filters.code !== 0) throw Error('workspace_changes_metadata_unavailable');
+    const records = filters.text.split('\0');
+    if (
+      process.platform !== 'win32' ||
+      records.pop() !== '' ||
+      records.length === 0 ||
+      records.length % 2 !== 0 ||
+      !records.every((record, index) =>
+        index % 2 === 0 ? record === 'system' : /^filter\.lfs\.(clean|process)$/.test(record),
+      )
+    )
       throw Error('workspace_changes_filters_unsupported');
-    if (filters.code !== 1) throw Error('workspace_changes_metadata_unavailable');
+    return true;
+  }
+
+  /** Git for Windows registers LFS system-wide. Check usage with the isolated Git config. */
+  private async checkSystemLfs(lease: Lease, root: string, paths?: string[]) {
+    const result = paths
+      ? await this.git(lease, root, ['check-attr', '-z', 'filter', '--', ...paths])
+      : await this.git(
+          lease,
+          root,
+          [
+            '--no-literal-pathspecs',
+            'ls-files',
+            '-z',
+            '--cached',
+            '--others',
+            '--exclude-standard',
+            '--',
+            ':(attr:filter=lfs)',
+          ],
+          1,
+        );
+    if (
+      result.truncated ||
+      (paths
+        ? result.text.split('\0').some((value, index) => index % 3 === 2 && value === 'lfs')
+        : result.text)
+    )
+      throw Error('workspace_changes_filters_unsupported');
+    if (result.code !== 0) throw Error('workspace_changes_metadata_unavailable');
   }
   private async checkAttributes(lease: Lease, root: string) {
     const info = await this.git(
@@ -425,7 +473,7 @@ export class NativeWorkspaceChanges {
         throw Error('workspace_changes_metadata_unavailable');
       return value.text.replace(/\r?\n$/, '');
     };
-    await this.checkFilters(lease, root);
+    const systemLfs = await this.checkFilters(lease, root);
     await this.checkAttributes(lease, root);
     let scalarConfig = '';
     const scalarKeys: Record<string, readonly string[]> = {
@@ -522,6 +570,7 @@ export class NativeWorkspaceChanges {
         { mode: 0o600 },
       );
       if (indexBytes) await writeFile(join(path, 'index'), indexBytes, { mode: 0o600 });
+      if (systemLfs) await this.checkSystemLfs(lease, root);
       this.check(lease);
     } catch (error) {
       snapshot.retired = true;
@@ -639,7 +688,7 @@ export class NativeWorkspaceChanges {
       const rootResult = await this.git(lease, path, ['rev-parse', '--show-toplevel']);
       if (rootResult.code !== 0 || rootResult.truncated)
         throw Error('workspace_changes_unavailable');
-      const root = rootResult.text.replace(/\r?\n$/, '');
+      const root = normalize(rootResult.text.replace(/\r?\n$/, ''));
       if (root !== marker || (await realpath(root)) !== root || !inside(root, path))
         throw Error('workspace_changes_unsafe_root');
       const gitDir = await this.git(lease, root, [
@@ -706,7 +755,7 @@ export class NativeWorkspaceChanges {
         lease.entries.set(entry.changeId, entry);
         page.entries.push(entry);
       }
-      await this.checkFilters(lease, root);
+      if (await this.checkFilters(lease, root)) await this.checkSystemLfs(lease, root);
       await this.checkAttributes(lease, root);
       page.repository = true;
       page.repositoryIdentity = createHash('sha256')
@@ -770,7 +819,7 @@ export class NativeWorkspaceChanges {
     const identity = await lstat(lease.root, { bigint: true });
     if (`${identity.dev}:${identity.ino}` !== lease.identity)
       throw Error('workspace_changes_path_changed');
-    await this.checkFilters(lease, lease.root);
+    const systemLfs = await this.checkFilters(lease, lease.root);
     await this.checkAttributes(lease, lease.root);
     const head = await this.git(
       lease,
@@ -787,7 +836,8 @@ export class NativeWorkspaceChanges {
     const path = join(lease.root, entry.path);
     let exists = true;
     // Check both rename paths and every existing parent before Git reads worktree content.
-    for (const name of [entry.path, ...(entry.oldPath ? [entry.oldPath] : [])]) {
+    const paths = entry.oldPath ? [entry.path, entry.oldPath] : [entry.path];
+    for (const name of paths) {
       const target = join(lease.root, name);
       for (let parent = dirname(target); inside(lease.root, parent); parent = dirname(parent)) {
         try {
@@ -824,6 +874,7 @@ export class NativeWorkspaceChanges {
           throw Error('workspace_changes_baseline_unavailable');
       }
     }
+    if (systemLfs) await this.checkSystemLfs(lease, lease.root, paths);
     if (!lease.head || (entry.untracked && entry.indexStatus !== 'D')) {
       if (!exists) {
         this.check(lease);

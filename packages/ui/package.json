@@ -52,6 +52,7 @@
     "ink-text-input": "^6.0.0",
     "katex": "0.16.47",
     "lowlight": "3.3.0",
+    "material-icon-theme": "5.40.0",
     "mermaid": "12.2.0",
     "react-markdown": "10.1.0",
     "react-resizable-panels": "4.12.4",

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync, type watch } from 'node:fs';
-import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -73,7 +73,8 @@ test('HEAD to final workspace includes staged, unstaged, untracked, deletion and
   await rm(join(f.root, 'deleted'));
   await rename(join(f.root, 'renamed'), join(f.root, 'new-name'));
   f.git('add', 'renamed', 'new-name');
-  await writeFile(join(f.root, 'odd\nname\t.txt'), 'untracked\n');
+  const oddName = process.platform === 'win32' ? 'odd # 文件.txt' : 'odd\nname\t.txt';
+  await writeFile(join(f.root, oddName), 'untracked\n');
   const page = await f.list();
   expect(page.repository).toBe(true);
   expect(page.truncated).toBe(false);
@@ -93,19 +94,27 @@ test('HEAD to final workspace includes staged, unstaged, untracked, deletion and
   expect(renamed.oldPath).toBe('renamed');
   expect((await f.owner.detail('read', renamed.changeId)).text).toContain('+original');
   const odd = page.entries.find((e) => e.untracked)!;
-  expect(odd.path).toBe('odd\nname\t.txt');
+  expect(odd.path).toBe(oddName);
   expect((await f.owner.detail('read', odd.changeId)).text).toContain('+untracked');
 });
-test('bounded content, binary and symlink are explicit; closed and changed selection reject', async () => {
+test('bounded content, binary and linked parents are explicit; closed and changed selection reject', async () => {
   const f = await setup();
   await writeFile(join(f.root, 'large'), 'a'.repeat(1048577));
   await writeFile(join(f.root, 'binary'), Buffer.from([0, 1]));
-  await symlink('/etc/passwd', join(f.root, 'link'));
+  const parent = join(f.root, 'parent');
+  const moved = join(f.root, 'moved');
+  await mkdir(parent);
+  await writeFile(join(parent, 'file'), 'before parent moved');
+  if (process.platform !== 'win32') await symlink(join(f.root, 'binary'), join(f.root, 'link'));
   const page = await f.list();
+  await rename(parent, moved);
+  await symlink(moved, parent, process.platform === 'win32' ? 'junction' : 'dir');
+  cleanup.push(() => unlink(parent));
   for (const [path, reason] of [
     ['large', 'too_large'],
     ['binary', 'binary'],
-    ['link', 'unsupported'],
+    ['parent/file', 'unsupported'],
+    ...(process.platform !== 'win32' ? ([['link', 'unsupported']] as const) : []),
   ] as const)
     expect(
       (await f.owner.detail('read', page.entries.find((e) => e.path === path)!.changeId)).reason,
@@ -319,6 +328,65 @@ test('configured clean/process filters are refused without executing repository 
     f.git('config', '--unset', `filter.malicious.${type}`);
   }
 });
+
+test.skipIf(process.platform !== 'win32')(
+  'Git for Windows system LFS allows ordinary changes, blocks applied attributes and recovers',
+  async () => {
+    const f = await setup();
+    const systemConfig = join(f.root, '.git', 'git-for-windows.conf');
+    const marker = join(f.root, 'filter-ran');
+    await writeFile(
+      systemConfig,
+      `[filter "lfs"]\nclean = "echo unsafe > '${marker.replaceAll('\\', '/')}'"\n`,
+    );
+    const processes = new NativeProcessOwner((command, args, options) =>
+      spawn(command, [...args], {
+        ...options,
+        env: { ...options.env, GIT_CONFIG_SYSTEM: systemConfig },
+      }),
+    );
+    cleanup.push(() => processes.close());
+    const scope = {
+      generation: 1,
+      viewSelection: 1,
+      storeId: 's',
+      sessionId: 's',
+      workspaceId: 'w',
+    };
+    const owner = new NativeWorkspaceChanges(
+      () => scope,
+      () => ({ rootUri: pathToFileURL(f.root).href }) as Workspace,
+      [],
+      processes,
+    );
+    cleanup.push(async () => owner.release());
+    const list = (readId: string) => owner.list({ generation: 1, viewSelection: 1, readId });
+
+    const target = join(f.root, 'ordinary.txt');
+    await writeFile(target, 'base\n');
+    f.git('add', 'ordinary.txt');
+    f.git('commit', '-m', 'base');
+    await writeFile(target, 'edited\n');
+    const ordinary = await list('ordinary');
+    const change = ordinary.entries.find((entry) => entry.path === 'ordinary.txt')!;
+    expect((await owner.detail('detail', change.changeId)).text).toContain('+edited');
+    const attributes = join(f.root, '.gitattributes');
+    await writeFile(attributes, '*.txt filter=lfs\n');
+    await expect(owner.detail('filtered-detail', change.changeId)).rejects.toThrow(
+      'workspace_changes_filters_unsupported',
+    );
+    await expect(list('filtered')).rejects.toThrow('workspace_changes_filters_unsupported');
+    expect(existsSync(marker)).toBe(false);
+
+    await unlink(attributes);
+    f.git('config', 'filter.lfs.clean', 'cat');
+    await expect(list('local-filter')).rejects.toThrow('workspace_changes_filters_unsupported');
+    f.git('config', '--unset', 'filter.lfs.clean');
+    const recovered = await list('recovered');
+    expect(recovered.entries.map((entry) => entry.path)).toEqual(['ordinary.txt']);
+  },
+  20000,
+);
 
 test('filter configuration introduced after a list cannot execute during detail', async () => {
   const f = await setup();

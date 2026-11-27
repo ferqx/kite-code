@@ -2,6 +2,17 @@
 @import "./file-diff.css";
 @reference "shadcn/tailwind.css";
 
+[data-slot="file-tree-icon"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background: var(--file-tree-icon-light) center / contain no-repeat;
+}
+
+[data-theme="dark"] [data-slot="file-tree-icon"] {
+  background-image: var(--file-tree-icon-dark);
+}
+
 @layer base {
   button,
   input,

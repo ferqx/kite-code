@@ -3,6 +3,7 @@ import { copyFile, mkdir, readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { desktopBundledDependencies } from './bundled-dependencies';
+import { copyDesktopFileIconAssets } from './desktop-file-icon-assets';
 
 const [output] = process.argv.slice(2);
 if (!output?.startsWith('--outdir=') || process.argv.slice(2).length !== 1)
@@ -92,6 +93,7 @@ const result = await Bun.build({
   outdir,
 });
 if (!result.success) throw new AggregateError(result.logs, 'desktop_ui_build_failed');
+await copyDesktopFileIconAssets(outdir);
 for (const name of ['style.css', 'file-diff.css'])
   await copyFile(join(source, name), join(outdir, name));
 for (const license of licenses) {

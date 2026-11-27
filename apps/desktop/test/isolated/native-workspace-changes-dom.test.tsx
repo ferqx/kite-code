@@ -198,6 +198,10 @@ async function fixture(entries = Array.from({ length: 65 }, (_, index) => change
     filter,
     key,
     cleanup,
+    async focusWindow() {
+      await act(async () => dom.window.dispatchEvent(new dom.window.Event('focus')));
+      await settle();
+    },
     async invalidate(
       overrides: Partial<Extract<NativeEvent, { kind: 'workspaceChanges.changed' }>> = {},
     ) {
@@ -273,24 +277,24 @@ test('reopening changes revalidates the selected path and uses only an ID from t
   }
 });
 
-test('workspace tree is metadata-first and fixed-page bounded; selecting a new file closes the old read', async () => {
+test('workspace tree shows every loaded file and selects details on demand', async () => {
   const f = await fixture();
   try {
     await f.render(false);
     expect(f.requests).toHaveLength(0);
     await f.render();
-    expect(f.host.textContent).toContain('不代表 Agent 的贡献');
-    expect(f.host.querySelectorAll('[role="treeitem"]')).toHaveLength(50);
+    expect(f.host.textContent).toContain('当前内容 ↔ HEAD');
+    expect(f.host.textContent).not.toContain('范围说明');
+    expect(f.host.textContent).not.toContain('不代表 Agent 的贡献');
+    expect(f.host.querySelectorAll('[data-change-id]')).toHaveLength(65);
+    expect(f.host.querySelector('[aria-label="文件树分页"]')).toBeNull();
     expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(0);
     expect(f.host.textContent).toContain('选择文件查看差异');
-    await f.clickButton('下一页');
-    expect(f.host.querySelectorAll('[role="treeitem"]')).toHaveLength(16);
     await f.select(64);
     expect(f.host.textContent).toContain('current-change-64');
     const firstRead = [...f.requests]
       .reverse()
       .find((item) => item.method === 'workspaceChanges.detail')!;
-    await f.clickButton('上一页');
     await f.select(0);
     expect(f.host.textContent).toContain('current-change-0');
     expect(f.host.textContent).not.toContain('current-change-64');
@@ -303,7 +307,13 @@ test('workspace tree is metadata-first and fixed-page bounded; selecting a new f
       ),
     ).toBe(true);
     expect(f.host.querySelectorAll('.workspace-change-preview')).toHaveLength(1);
-    expect(f.host.textContent).toContain('已暂存 M / 未暂存 M');
+    expect(f.host.querySelector('.workspace-change-file-meta span:last-child')?.textContent).toBe(
+      '已暂存修改 · 未暂存修改',
+    );
+    expect(
+      f.host.querySelector('[data-change-id="change-0"] .workspace-change-tree-status')
+        ?.textContent,
+    ).toBe('M, M');
     expect(
       f.requests
         .filter((item) => item.method === 'workspaceChanges.detail')
@@ -348,8 +358,15 @@ test('filtering and directory folding keep selection distinct, cancel hidden rea
     expect(f.host.querySelector('[data-change-id="change-1"]') !== null).toBe(true);
     expect(f.host.querySelector('.workspace-change-preview') === null).toBe(true);
     await f.select(1);
-    expect(f.host.textContent).toContain('重命名：legacy/old.ts → src/beta.ts');
-    expect(f.host.textContent).toContain('已暂存 R');
+    expect(f.host.querySelector('.workspace-change-file-heading strong')?.textContent).toBe(
+      'beta.ts',
+    );
+    expect(f.host.querySelector('.workspace-change-rename')?.textContent).toBe(
+      '原路径 legacy/old.ts',
+    );
+    expect(f.host.querySelector('.workspace-change-file-meta span:last-child')?.textContent).toBe(
+      '已暂存重命名',
+    );
     await f.filter('missing');
     expect(f.host.textContent).toContain('没有匹配的变更文件');
     expect(f.host.querySelector('.workspace-change-preview') === null).toBe(true);
@@ -359,14 +376,18 @@ test('filtering and directory folding keep selection distinct, cancel hidden rea
     ).toContain('未跟踪');
     expect(
       f.host.querySelector('[data-change-id="change-3"]')?.getAttribute('aria-label'),
-    ).toContain('冲突 UU');
+    ).toContain('冲突 · 双方均修改');
+    expect(
+      f.host.querySelector('[data-change-id="change-2"] .workspace-change-tree-status')
+        ?.textContent,
+    ).toBe('U');
     expect(f.host.querySelector('.workspace-change-preview') === null).toBe(true);
   } finally {
     await f.cleanup();
   }
 });
 
-test('keyboard navigation crosses pages, folds directories and exposes only one tree tab stop', async () => {
+test('keyboard navigation reaches the entire tree, folds directories and keeps one tab stop', async () => {
   const f = await fixture();
   try {
     await f.render();
@@ -376,17 +397,16 @@ test('keyboard navigation crosses pages, folds directories and exposes only one 
     expect(f.host.querySelectorAll('[role="treeitem"]')).toHaveLength(1);
     expect(first.getAttribute('aria-expanded')).toBe('false');
     await f.key('ArrowRight');
-    expect(f.host.querySelectorAll('[role="treeitem"]')).toHaveLength(50);
+    expect(f.host.querySelectorAll('[role="treeitem"]')).toHaveLength(66);
     await f.key('ArrowRight');
     expect(f.dom.window.document.activeElement?.getAttribute('data-change-id')).toBe('change-0');
     await f.key('End');
     expect(f.dom.window.document.activeElement?.getAttribute('data-change-id')).toBe('change-64');
-    expect(f.host.querySelectorAll('[role="treeitem"]')).toHaveLength(16);
     expect(f.host.querySelectorAll('[role="treeitem"][tabindex="0"]')).toHaveLength(1);
     expect(f.dom.window.document.activeElement?.getAttribute('aria-level')).toBe('2');
     await f.key('ArrowLeft');
     expect(f.dom.window.document.activeElement?.getAttribute('title')).toBe('src/');
-    expect(f.host.querySelectorAll('[role="treeitem"]')).toHaveLength(50);
+    expect(f.host.querySelectorAll('[role="treeitem"]')).toHaveLength(66);
     expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(0);
   } finally {
     await f.cleanup();
@@ -426,7 +446,7 @@ test('rapid selection, filter, refresh, scope replacement and closing ignore lat
     expect(f.host.textContent).not.toContain('current-change-2');
     await f.settle(1_100);
     f.state.listMode = 'held';
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     await f.settle(1_100);
     const lateList = f.heldLists[0]!;
     f.state.sessionId = 'two';
@@ -459,55 +479,57 @@ test('failed, unsupported, truncated, binary and empty reads keep their true sta
     f.state.detailReason = 'binary';
     await f.select(0);
     expect(f.host.textContent).toContain('二进制文件不显示文本差异');
-    expect(f.host.textContent).toContain('src/0.txt');
+    expect(f.host.querySelector('.workspace-change-file-heading')?.getAttribute('title')).toBe(
+      'src/0.txt',
+    );
     for (const [reason, message] of [
       ['too_large', '文件过大'],
       ['unsupported', '不支持文本预览'],
       ['unavailable', '差异目前不可读'],
     ] as const) {
       f.state.detailReason = reason;
-      await f.clickButton('刷新变更');
+      await f.focusWindow();
       await f.select(0);
       expect(f.host.textContent).toContain(message);
       expect(f.host.textContent).not.toContain('本次读取未发现');
     }
     f.state.detailReason = undefined;
     f.state.detailEmpty = true;
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     await f.select(0);
     expect(f.host.textContent).toContain('当前文件内容与 HEAD 相同；暂存区仍可能有独立改动');
     f.state.detailEmpty = false;
     f.state.detailTruncated = true;
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     await f.select(0);
     expect(f.host.textContent).toContain('未显示全部改动');
     f.state.detailMode = 'mismatch';
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     await f.select(0);
     expect(f.host.querySelector('[role="alert"]')?.textContent).toContain('无法读取当前差异');
     for (const [mode, message] of [
-      ['failure', '读取失败不表示没有改动'],
+      ['failure', '请重新打开「变更」重试'],
       ['filters', '为避免执行外部程序'],
       ['mismatch', '无法确认工作区变更'],
     ] as const) {
       f.state.listMode = mode;
-      await f.clickButton('刷新变更');
+      await f.focusWindow();
       expect(f.host.querySelector('[role="alert"]')?.textContent).toContain(message);
       expect(f.host.textContent).not.toContain('本次读取未发现');
       expect(f.host.querySelector('[role="tree"]') !== null).toBe(true);
       expect(f.host.textContent).toContain('当前显示上次读取的结果');
     }
     f.state.listMode = 'nonrepo';
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.host.textContent).toContain('不在 Git 仓库');
     f.state.listMode = 'normal';
     f.state.entries = [];
     f.state.truncated = true;
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.host.textContent).toContain('仓库变更列表已截断');
     expect(f.host.textContent).not.toContain('本次读取未发现');
     f.state.truncated = false;
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.host.textContent).toContain('本次读取未发现');
   } finally {
     await f.cleanup();
@@ -522,18 +544,20 @@ test('selecting another file after a failed list refresh reports the unavailable
     const original = f.host.querySelector('.file-diff');
     expect(original?.textContent).toContain('current-change-0');
     f.state.listMode = 'failure';
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.host.querySelector('.file-diff')).toBe(original);
     expect(f.host.textContent).toContain('当前显示上次读取的结果');
     const reads = requestCount(f.requests, 'workspaceChanges.detail');
     await f.select(1);
     const preview = f.host.querySelector('.workspace-change-preview');
-    expect(preview?.querySelector('[role="alert"]')?.textContent).toContain('请刷新变更列表后重试');
+    expect(preview?.querySelector('[role="alert"]')?.textContent).toContain(
+      '请重新打开「变更」重试',
+    );
     expect(preview?.querySelector('[aria-label="正在读取当前差异"]')).toBeNull();
     expect(preview?.querySelector('.file-diff')).toBeNull();
     expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(reads);
     f.state.listMode = 'normal';
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.host.querySelector('.workspace-change-preview [role="alert"]')).toBeNull();
     expect(f.host.querySelector('.file-diff')?.textContent).toContain('current-change-1');
     expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(reads + 1);
@@ -550,14 +574,14 @@ test('huge metadata and long/deep paths keep a bounded tree and original detail 
   ]);
   try {
     await f.render();
-    expect(f.host.querySelectorAll('[role="treeitem"]')).toHaveLength(50);
+    expect(f.host.querySelectorAll('[data-change-id]')).toHaveLength(1_000);
     expect(f.host.textContent).toContain('1000+ 个文件');
     expect(f.host.textContent).toContain('仓库变更列表已截断');
     expect(f.host.querySelectorAll('[role="treeitem"][aria-level="26"]')).toHaveLength(0);
     const row = f.host.querySelector<HTMLElement>('[data-change-id="change-0"]')!;
     expect(row.title.length).toBeLessThanOrEqual(1_024);
     expect(
-      row.querySelector('.workspace-change-tree-name')!.textContent!.length,
+      row.querySelector('[data-slot="file-tree-name"]')!.textContent!.length,
     ).toBeLessThanOrEqual(240);
     expect(row.textContent).toContain('…/');
     expect(f.host.textContent).toContain('部分目录已简化为相对路径');
@@ -572,7 +596,7 @@ test('huge metadata and long/deep paths keep a bounded tree and original detail 
     expect(f.host.textContent).toContain('没有匹配的变更文件');
     await f.filter('files/998.ts');
     expect(f.host.querySelector('[data-change-id="change-999"]') !== null).toBe(true);
-    expect(f.host.querySelectorAll('[role="treeitem"]').length).toBeLessThanOrEqual(50);
+    expect(f.host.querySelectorAll('[role="treeitem"]')).toHaveLength(2);
   } finally {
     await f.cleanup();
   }
@@ -582,7 +606,6 @@ test('refresh revalidates only the selected path and keeps layout; missing paths
   const f = await fixture();
   try {
     await f.render();
-    await f.clickButton('下一页');
     await f.select(64);
     await f.clickButton('统一');
     expect(
@@ -593,7 +616,7 @@ test('refresh revalidates only the selected path and keeps layout; missing paths
       changeId: `fresh-${entry.changeId}`,
     }));
     f.state.listMode = 'held';
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.host.textContent).toContain('current-change-64');
     expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(1);
     await act(async () => f.heldLists.shift()!());
@@ -612,7 +635,7 @@ test('refresh revalidates only the selected path and keeps layout; missing paths
     expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(2);
     f.state.listMode = 'normal';
     f.state.entries = [change(0)];
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.host.querySelector('.workspace-change-preview') === null).toBe(true);
     expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(2);
     await f.select(0);
@@ -634,14 +657,15 @@ test('refresh revalidates only the selected path and keeps layout; missing paths
   }
 });
 
-test('same-scope filter survives manual, focus and message refresh without restoring a filtered-out detail', async () => {
+test('same-scope filter survives file invalidation, focus and message refresh without restoring a filtered-out detail', async () => {
   const f = await fixture();
   const query = () => f.host.querySelector<HTMLInputElement>('input[type="search"]')!.value;
   try {
     await f.render();
     await f.filter('64.txt');
     await f.select(64);
-    await f.clickButton('刷新变更');
+    await f.invalidate();
+    await f.settle(1_100);
     expect(query()).toBe('64.txt');
     expect(f.host.querySelectorAll('[data-change-id]')).toHaveLength(1);
     expect(f.host.textContent).toContain('current-change-64');
@@ -685,11 +709,11 @@ test('refreshed rename metadata clears a selection that no longer matches the re
     await f.select(0);
     expect(requestCount(f.requests, 'workspaceChanges.detail')).toBe(1);
     f.state.entries = [change(0, 'src/current.ts')];
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.host.querySelector('.workspace-change-preview') === null).toBe(true);
     expect(f.host.textContent).toContain('没有匹配的变更文件');
     f.state.entries = [{ ...change(0, 'src/current.ts'), oldPath: 'legacy/previous.ts' }];
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.host.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe(
       'previous.ts',
     );
@@ -751,11 +775,11 @@ test('successive execution-root resets clear old content and reject late lists a
     await f.select(0);
     expect(f.host.textContent).toContain('current-change-0');
     f.state.detailMode = 'held';
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.heldDetails).toHaveLength(1);
     const oldDetail = f.heldDetails.shift()!;
     f.state.listMode = 'held';
-    await f.clickButton('刷新变更');
+    await f.focusWindow();
     expect(f.heldLists).toHaveLength(1);
     const oldList = f.heldLists.shift()!;
     const oldRead = [...f.requests]

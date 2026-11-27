@@ -34,6 +34,7 @@ import {
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build as buildRenderer } from 'vite';
+import { copyDesktopFileIconAssets } from '../../../packages/ui/scripts/desktop-file-icon-assets';
 import { type DesktopDevelopment, parseDesktopDevelopment } from '../electron/development';
 import type { MacosElectronResize } from '../electron/macos-electron-resize';
 import { type NativeAssets, parseNativeAssets, verifyNativeAsset } from '../electron/native-assets';
@@ -153,7 +154,7 @@ async function buildNativeApp(
   // Development loads Root and the fixed modal renderers from its Vite server.
   // Only fixed renderers need production HTML, CSS/fonts and JavaScript here.
   if (process.platform === 'win32') privateDirectory(join(outdir, 'assets'));
-  if (!development)
+  if (!development) {
     await buildRenderer({
       root,
       configFile: false,
@@ -190,6 +191,8 @@ async function buildNativeApp(
         },
       },
     });
+    await copyDesktopFileIconAssets(outdir);
+  }
   await writeFile(
     join(outdir, 'package.json'),
     JSON.stringify({ name: 'kite-native', version: '0.1.0', main: 'main.cjs' }),

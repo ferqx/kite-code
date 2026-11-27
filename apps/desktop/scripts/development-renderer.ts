@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
+import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { createServer, type FSWatcher, normalizePath, type ViteDevServer } from 'vite';
+import { copyDesktopFileIconAssets } from '../../../packages/ui/scripts/desktop-file-icon-assets';
 import { desktopMarkdownDecoderAlias } from './markdown-worker-resolution';
 
 /** Own a fresh instance of Vite's public FSWatcher class, including its first scan. */
@@ -136,6 +139,7 @@ export async function startDesktopRenderer(root: string) {
   const validators = normalizePath(resolve(root, 'packages/client/src/generated/validators.js'));
   const desktopCache = normalizePath(resolve(root, 'apps/desktop/.cache'));
   const http = createHttpServer();
+  const publicDir = await mkdtemp(join(tmpdir(), 'kite-desktop-public-'));
   let server: ViteDevServer | undefined;
   let closing: Promise<void> | undefined;
   const close = () =>
@@ -143,14 +147,19 @@ export async function startDesktopRenderer(root: string) {
       try {
         await server?.close();
       } finally {
-        if (http.listening)
-          await new Promise<void>((resolve, reject) => {
-            http.close((error) => (error ? reject(error) : resolve()));
-            http.closeAllConnections();
-          });
+        try {
+          if (http.listening)
+            await new Promise<void>((resolve, reject) => {
+              http.close((error) => (error ? reject(error) : resolve()));
+              http.closeAllConnections();
+            });
+        } finally {
+          await rm(publicDir, { recursive: true, force: true });
+        }
       }
     })());
   try {
+    await copyDesktopFileIconAssets(publicDir);
     await new Promise<void>((resolve, reject) => {
       http.once('error', reject);
       http.listen(0, '127.0.0.1', () => {
@@ -164,6 +173,7 @@ export async function startDesktopRenderer(root: string) {
     // Middleware mode leaves signals and process exit to the owning development host.
     server = await createServer({
       root: join(root, 'apps/desktop'),
+      publicDir,
       configFile: false,
       envFile: false,
       mode: 'development',

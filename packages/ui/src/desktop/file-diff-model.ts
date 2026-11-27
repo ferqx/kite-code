@@ -132,11 +132,15 @@ const PRODUCER_LIMIT =
 export function parseFileDiff(source: string, path = ''): DiffModel {
   const bounded = boundedLines(source);
   const lines = bounded.lines;
-  const format = lines.some((line) => HUNK.test(line) || line.startsWith('diff --git '))
-    ? 'git'
-    : lines.some((line) => OPERATION_HEADER.test(line) || NUMBERED.test(line))
-      ? 'operation'
-      : 'plain';
+  const gitHeader =
+    lines[0] === '--- /dev/null' &&
+    (lines[1]?.startsWith('+++ b/') || lines[1]?.startsWith('+++ "b/'));
+  const format =
+    gitHeader || lines.some((line) => HUNK.test(line) || line.startsWith('diff --git '))
+      ? 'git'
+      : lines.some((line) => OPERATION_HEADER.test(line) || NUMBERED.test(line))
+        ? 'operation'
+        : 'plain';
   let truncated = bounded.truncated;
   let omitted = false;
   let added = 0;

@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode, useId, useMemo, useRef, useState } from 'react';
+import { ButtonGroup } from './components/ui/button-group';
 import { CodeBlockCopyButton } from './components/ui/code-block';
 import { ScrollArea } from './components/ui/scroll-area';
 import {
@@ -107,6 +108,7 @@ export function FileDiff({
   inline = false,
   openFile,
   fileOpenBlocked,
+  header,
 }: {
   message: Message;
   path?: string;
@@ -116,6 +118,7 @@ export function FileDiff({
   inline?: boolean;
   openFile?: (path: string) => void;
   fileOpenBlocked?: boolean;
+  header?: { title: ReactNode; action: ReactNode };
 }) {
   const source =
     message.toolResult?.stdout || message.toolResult?.stderr || '工具没有返回可读差异。';
@@ -131,6 +134,7 @@ export function FileDiff({
       copyText={inline ? source : undefined}
       openFile={openFile}
       fileOpenBlocked={fileOpenBlocked}
+      header={header}
     />
   );
 }
@@ -197,6 +201,7 @@ function DiffReader({
   copyText,
   openFile,
   fileOpenBlocked,
+  header,
 }: {
   model: DiffModel;
   path?: string;
@@ -206,8 +211,12 @@ function DiffReader({
   copyText?: string;
   openFile?: (path: string) => void;
   fileOpenBlocked?: boolean;
+  header?: { title: ReactNode; action: ReactNode };
 }) {
   const inline = copyText !== undefined;
+  const singleUnifiedGutter = inline || scope === 'workspace';
+  const workspaceGit = scope === 'workspace' && model.format === 'git';
+  const compactMetadata = inline || workspaceGit;
   const [localLayout, setLayout] = useState<'split' | 'unified'>('split');
   const layout = inline ? 'unified' : (controlledLayout ?? localLayout);
   const [folds, setFolds] = useState<{ model: DiffModel; expanded: Set<number> }>({
@@ -219,17 +228,18 @@ function DiffReader({
   const expanded = folds.model === model ? folds.expanded : new Set<number>();
   const rows = useMemo(() => {
     const result = fileDiffRows(model[layout], expanded);
-    if (!inline || model.format === 'plain') return result;
+    if (!compactMetadata || model.format === 'plain') return result;
     let seenHunk = false;
     return result.filter((row) => {
       if (row.kind !== 'meta') return true;
       if (row.text === '\\ No newline at end of file') return true;
-      if (!row.text.startsWith('@@ ')) return false;
+      if (!row.text.startsWith('@@ '))
+        return workspaceGit && /^(old|new) mode [0-7]{6}$/.test(row.text);
       if (seenHunk) return true;
       seenHunk = true;
       return false;
     });
-  }, [model, layout, expanded, inline]);
+  }, [model, layout, expanded, compactMetadata, workspaceGit]);
   const viewport = useRef<HTMLDivElement>(null);
   const bodyId = useId();
   const hasContext = model.split.some(
@@ -250,7 +260,7 @@ function DiffReader({
     };
     for (const row of model[layout]) {
       if (row.kind !== 'context' && row.kind !== 'change') {
-        metadata = Math.max(metadata, width(row.text));
+        if (!(workspaceGit && row.kind === 'meta')) metadata = Math.max(metadata, width(row.text));
         continue;
       }
       for (const line of [row.before, row.after]) {
@@ -264,10 +274,12 @@ function DiffReader({
       gutter,
       columns: Math.max(
         metadata + 2,
-        layout === 'split' ? (max + gutter + 4) * 2 : max + (inline ? gutter : gutter * 2) + 4,
+        layout === 'split'
+          ? (max + gutter + 4) * 2
+          : max + (singleUnifiedGutter ? gutter : gutter * 2) + 4,
       ),
     };
-  }, [model, layout, inline]);
+  }, [model, layout, singleUnifiedGutter, workspaceGit]);
   const chooseLayout = (next: 'split' | 'unified') => {
     if (next === layout) return;
     setLayout(next);
@@ -284,7 +296,9 @@ function DiffReader({
       data-inline={inline || undefined}
     >
       <div className="file-diff-toolbar">
-        {inline && path && openFile ? (
+        {header ? (
+          header.title
+        ) : inline && path && openFile ? (
           <Button
             className="file-diff-path file-link"
             title={path}
@@ -308,26 +322,29 @@ function DiffReader({
         {inline ? (
           <CodeBlockCopyButton value={copyText} contentLabel="差异" />
         ) : (
-          <fieldset className="file-diff-layout" aria-label="差异布局">
-            <button
-              type="button"
+          <ButtonGroup className="file-diff-layout" aria-label="差异布局">
+            <Button
+              variant="ghost"
+              size="xs"
               aria-pressed={layout === 'split'}
               onClick={() => chooseLayout('split')}
             >
               双栏
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
               aria-pressed={layout === 'unified'}
               onClick={() => chooseLayout('unified')}
             >
               统一
-            </button>
-          </fieldset>
+            </Button>
+          </ButtonGroup>
         )}
         {!inline && hasContext && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon-xs"
             className="file-diff-collapse"
             disabled={!expanded.size}
             onClick={() => {
@@ -338,8 +355,9 @@ function DiffReader({
             title="折叠未变更行"
           >
             ↥
-          </button>
+          </Button>
         )}
+        {header?.action}
       </div>
       {model.truncated && (
         <p className="file-diff-notice" role="status">
@@ -349,13 +367,11 @@ function DiffReader({
       {model.format === 'plain' ? (
         <p className="file-diff-notice">原始输出：未识别的差异格式，不推断行号或修改前后内容。</p>
       ) : (
-        !inline && (
+        !inline &&
+        (layout === 'split' || scope !== 'workspace') && (
           <div className="file-diff-sides">
             {layout === 'unified' ? (
-              <span>
-                统一差异 · 旧行 / 新行 ·{' '}
-                {scope === 'workspace' ? 'HEAD → 当前文件' : '本次操作前 → 操作后'}
-              </span>
+              <span>统一差异 · 旧行 / 新行 · 本次操作前 → 操作后</span>
             ) : (
               <>
                 <span>{scope === 'workspace' ? '修改前 · HEAD' : '修改前 · 本次操作前'}</span>
@@ -365,11 +381,13 @@ function DiffReader({
           </div>
         )
       )}
-      {inline &&
+      {(inline || (workspaceGit && rows.length === 0)) &&
         model.format !== 'plain' &&
         model.added === 0 &&
         model.removed === 0 &&
-        !model.truncated && <p className="file-diff-notice">内容未变更</p>}
+        !model.truncated && (
+          <p className="file-diff-notice">{inline ? '内容未变更' : '没有可显示的文本差异。'}</p>
+        )}
       <ScrollArea
         orientation="both"
         fade="y"
@@ -406,7 +424,7 @@ function DiffReader({
                   <span aria-hidden="true">⌄</span> {row.count} 行未变更 · 展开保留的上下文
                 </button>
               );
-            if (inline && row.kind === 'meta' && row.text.startsWith('@@ '))
+            if (compactMetadata && row.kind === 'meta' && row.text.startsWith('@@ '))
               return <div key={index} className="file-diff-hunk-separator" aria-hidden="true" />;
             if (inline && row.kind === 'omitted')
               return (
@@ -417,21 +435,25 @@ function DiffReader({
             if (row.kind !== 'context' && row.kind !== 'change')
               return (
                 <div key={index} className={`file-diff-row file-diff-${row.kind}`}>
-                  {inline && row.text === '\\ No newline at end of file'
+                  {compactMetadata && row.text === '\\ No newline at end of file'
                     ? '文件末尾没有换行'
-                    : row.text}
+                    : workspaceGit && row.text.startsWith('old mode ')
+                      ? `原文件模式 ${row.text.slice(9)}`
+                      : workspaceGit && row.text.startsWith('new mode ')
+                        ? `当前文件模式 ${row.text.slice(9)}`
+                        : row.text}
                 </div>
               );
             if (layout === 'unified')
               return (
                 <div key={index} className="file-diff-row file-diff-unified-row">
-                  {!inline && (
+                  {!singleUnifiedGutter && (
                     <span className="file-diff-old-number">{row.before?.number ?? ''}</span>
                   )}
                   <DiffCell
                     line={row.after ?? row.before}
                     side={row.after ? 'after' : 'before'}
-                    showNumber={inline || !!row.after}
+                    showNumber={singleUnifiedGutter || !!row.after}
                     showSign={!inline}
                     change={row.kind === 'change'}
                   />

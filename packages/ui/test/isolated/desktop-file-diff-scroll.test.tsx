@@ -430,6 +430,7 @@ test('split diff aligns replacements, preserves plain markup and switches to gen
           'split',
           [
             'diff --git a/old.ts b/renamed file.ts',
+            'index 0001234..4567890 100644',
             'rename from old.ts',
             'rename to renamed file.ts',
             '--- a/old.ts',
@@ -444,8 +445,10 @@ test('split diff aligns replacements, preserves plain markup and switches to gen
       />,
     );
     expect(host.querySelector('.file-diff')?.getAttribute('data-layout')).toBe('split');
+    expect(host.querySelectorAll('.file-diff-sides span')).toHaveLength(2);
     expect(host.querySelector('.file-diff-path')?.textContent).toBe('src/renamed file.ts');
     expect(host.querySelector('.file-diff-counts')?.textContent).toBe('预览 +2 -1');
+    expect(host.querySelector('.file-diff-meta')).toBeNull();
     expect(host.querySelectorAll('script, img')).toHaveLength(0);
     expect(host.querySelectorAll('.file-diff-empty')).toHaveLength(1);
     const replacement = host.querySelector('.file-diff-split-row:has(.diff-removed)')!;
@@ -462,16 +465,34 @@ test('split diff aligns replacements, preserves plain markup and switches to gen
     await click(unified);
     expect(unified.getAttribute('aria-pressed')).toBe('true');
     expect(host.querySelector('.file-diff')?.getAttribute('data-layout')).toBe('unified');
+    expect(host.querySelector('.file-diff-sides')).toBeNull();
+    expect(host.querySelector('.file-diff-meta')).toBeNull();
     expect(host.querySelector('.tool-diff-viewport')).toBe(viewport);
     expect(host.querySelectorAll('.file-diff-unified-row')).toHaveLength(4);
     expect(host.querySelectorAll('.file-diff-empty')).toHaveLength(0);
+    expect(host.querySelector('.file-diff-old-number')).toBeNull();
     const removed = host.querySelector('.file-diff-unified-row:has(.diff-removed)')!;
-    expect(removed.querySelector('.file-diff-old-number')?.textContent).toBe('4');
-    expect(removed.querySelector('.file-diff-number')?.textContent).toBe('');
+    expect(removed.querySelector('.file-diff-number')?.textContent).toBe('4');
     const added = host.querySelector('.file-diff-unified-row:has(.diff-added)')!;
-    expect(added.querySelector('.file-diff-old-number')?.textContent).toBe('');
     expect(added.querySelector('.file-diff-number')?.textContent).toBe('8');
+    const context = host.querySelector('.file-diff-unified-row')!;
+    expect(context.querySelector('.file-diff-number')?.textContent).toBe('7');
     expect(host.querySelectorAll('[role="region"]')).toHaveLength(1);
+  });
+});
+
+test('an empty untracked file shows a text diff status instead of patch headers', async () => {
+  await withDom(async ({ host, render }) => {
+    await render(
+      <FileDiff
+        scope="workspace"
+        path="empty.txt"
+        message={message('empty', '--- /dev/null\n+++ "b/empty.txt"\n')}
+      />,
+    );
+    expect(host.querySelector('.file-diff')?.getAttribute('data-format')).toBe('git');
+    expect(host.querySelector('.diff-output')?.textContent).toBe('');
+    expect(host.querySelector('.file-diff-notice')?.textContent).toBe('没有可显示的文本差异。');
   });
 });
 
@@ -566,7 +587,9 @@ test('controlled layout remains the workspace choice across files and narrow con
     expect(host.querySelector('.file-diff')?.getAttribute('data-layout')).toBe('unified');
     await render(tree('second', 'unified'));
     expect(host.querySelector('.file-diff')?.getAttribute('data-layout')).toBe('unified');
-    expect(host.querySelector('fieldset')?.getAttribute('aria-label')).toBe('差异布局');
+    expect(
+      host.querySelector('[data-slot="button-group"][role="group"]')?.getAttribute('aria-label'),
+    ).toBe('差异布局');
     expect(host.querySelector('.tool-diff-viewport')?.getAttribute('tabindex')).toBe('0');
     expect(host.querySelector('.tool-diff-viewport')?.getAttribute('aria-label')).toBe('文件差异');
     await render(tree('second', 'split'));

@@ -266,6 +266,68 @@
 .kite-client .file-diff .file-diff-token-comment {
   color: var(--file-diff-comment);
 }
+
+.kite-client .file-diff[data-scope="workspace"] .file-diff-toolbar {
+  min-height: 56px;
+  padding: 7px 12px;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: color-mix(in oklch, var(--foreground) 2.5%, var(--background));
+}
+
+.kite-client .file-diff[data-scope="workspace"] .file-diff-layout {
+  border-radius: 6px;
+  background: var(--background);
+}
+
+.kite-client .file-diff[data-scope="workspace"] .file-diff-sides {
+  background: color-mix(in oklch, var(--foreground) 3%, var(--background));
+  line-height: 28px;
+}
+
+.kite-client .file-diff[data-scope="workspace"][data-layout="split"] .file-diff-sides {
+  border-inline-end: 10px solid transparent;
+}
+
+.kite-client
+  .file-diff[data-scope="workspace"][data-layout="split"]:has(
+    .tool-diff-viewport[data-native-scrollbars]
+  )
+  .file-diff-sides {
+  border-inline-end: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.kite-client .file-diff[data-scope="workspace"] .file-diff-hunk-separator {
+  height: 11px;
+  border-block: 1px solid var(--border);
+  background: color-mix(in oklch, var(--foreground) 3%, var(--background));
+}
+
+.kite-client .file-diff[data-scope="workspace"] .file-diff-empty {
+  background: color-mix(in oklch, var(--foreground) 3%, var(--background));
+}
+
+.kite-client .file-diff[data-scope="workspace"] .file-diff-fold {
+  padding-inline: 12px;
+  background: color-mix(in oklch, var(--foreground) 5%, var(--background));
+}
+
+.kite-client
+  .file-diff[data-scope="workspace"][data-layout="split"][data-format="git"]
+  .diff-output {
+  width: 100%;
+}
+
+.kite-client
+  .file-diff[data-scope="workspace"][data-layout="split"][data-format="git"]
+  .file-diff-code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .kite-client .file-diff[data-inline] {
   overflow: hidden;
   border: 1px solid var(--border);

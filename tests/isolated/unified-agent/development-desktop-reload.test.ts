@@ -583,6 +583,12 @@ test('Vite serves a nonce-bearing hot renderer on loopback with scoped sourcemap
     );
     expect(publicFile.status).toBe(200);
     expect(await publicFile.text()).toBe('public-renderer-sentinel');
+    const icon = await fetch(
+      `${renderer.configuration.rendererUrl}file-tree-icons/typescript-def.svg`,
+    );
+    expect(icon.status).toBe(200);
+    expect(icon.headers.get('content-type')).toMatch(/^image\/svg\+xml/);
+    expect(await icon.text()).toContain('<svg');
     const generatedUrl = `${renderer.configuration.rendererUrl}@fs/${generated.replaceAll('\\', '/')}`;
     const validators = await fetch(`${generatedUrl}/validators.js`);
     expect(validators.status).toBe(200);

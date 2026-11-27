@@ -60,6 +60,7 @@ export {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
+export { FileTree, FileTreeFile, FileTreeFolder } from './components/ui/file-tree';
 export { Input } from './components/ui/input';
 export {
   PillSelectTrigger,

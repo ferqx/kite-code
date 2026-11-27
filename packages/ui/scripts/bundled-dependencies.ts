@@ -19,6 +19,7 @@ export const desktopBundledDependencies: readonly string[] = Object.freeze([
   'cmdk',
   'github-slugger',
   'lowlight',
+  'material-icon-theme',
   'mermaid',
   'react-markdown',
   'react-resizable-panels',

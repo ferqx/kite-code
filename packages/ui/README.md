@@ -85,7 +85,7 @@ Shell 工具行与当前工具的思维链摘要使用原命令或已核实的�
 
 定时任务列表被覆盖时，由[会话页](src/desktop/SessionPage.tsx)将列表焦点移到编辑器并暂时停用列表，关闭后恢复入口焦点。项目侧栏和会话详情栏的方向键调宽控件各有独立的无障碍名称。[浏览器工具栏](src/desktop/SessionTabs.tsx)接收 Desktop 提供的地址错误并关联到输入字段。
 
-Desktop 入口导出公共 shadcn Input、Textarea、Select 和 Switch 供 Native 设置复用。办公文件预览在宿主 DOM 使用公共 shadcn Select。交付图片的独立透明浮层通过 `@kite-ai/ui/desktop/select` 加载同一组件。Select使用Radix触发器、选项和可指定容器的Portal，Switch保留受控的`checked`／`onCheckedChange`及无障碍语义；共享样式的旧设置按钮兜底避开带`data-slot`的公共组件，防止覆盖开关几何和状态底色。`SessionPage`导出的`NAVIGATION_MIN_WIDTH`同时提供设置导航宽度，数值只在共享布局中维护。`RightSidebar`内的定时任务和Native配置表单共用`.right-sidebar-editor`、`-body`、`-footer`结构：标题和底栏固定，中段收缩并独立滚动，内容与底栏留白分别为12px和8px／12px；正文也是绝对定位辅助控件的包含块，隐藏表单控件不撑开外层栏体。设置页的布局与实际验证归[Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)。
+Desktop 入口导出公共 shadcn Input、Textarea、Select 和 Switch 供 Native 设置复用。[File Tree](src/desktop/components/ui/file-tree.tsx)沿用 [shadcn AI Elements File Tree](https://ui.shadcn.com/docs/ai-elements/base/file-tree)的组合方式，目录复用公共 Collapsible，文件行复用公共 Button。共享组件负责目录组、展开语义和图标。文件按 Material Icon Theme 的路径和文件名、最长后缀顺序匹配；目录按路径／名称和展开状态匹配，浅色主题采用上游提供的变体。未知类型使用通用图标。[共享资源构建](scripts/desktop-file-icon-assets.ts)从锁定依赖复制 SVG 和 MIT 许可证到 renderer 页面同级的 `file-tree-icons/`。调用方提供可见项、焦点、选择状态和行尾内容。办公文件预览在宿主 DOM 使用公共 shadcn Select。交付图片的独立透明浮层通过 `@kite-ai/ui/desktop/select` 加载同一组件。Select使用Radix触发器、选项和可指定容器的Portal，Switch保留受控的`checked`／`onCheckedChange`及无障碍语义；共享样式的旧设置按钮兜底避开带`data-slot`的公共组件，防止覆盖开关几何和状态底色。`SessionPage`导出的`NAVIGATION_MIN_WIDTH`同时提供设置导航宽度，数值只在共享布局中维护。`RightSidebar`内的定时任务和Native配置表单共用`.right-sidebar-editor`、`-body`、`-footer`结构：标题和底栏固定，中段收缩并独立滚动，内容与底栏留白分别为12px和8px／12px；正文也是绝对定位辅助控件的包含块，隐藏表单控件不撑开外层栏体。设置页的布局与实际验证归[Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)。
 
 新增Select沿现有Dialog的Radix依赖族锁定版本，共用DismissableLayer与FocusScope，避免嵌套菜单的Escape同时关闭父层；更新依赖时须保留该嵌套交互回归。Native的选择器组合仅提交当前选项中的值，条件选项重建时隐藏表单控件的空值通知不会清空已选的凭据处理方式。
 
@@ -725,7 +725,7 @@ Native宿主可给`useSessionTabs`提供只读保留页恢复回调：恢复期�
 
 共享 [ToolActivity](src/desktop/ToolActivity.tsx)允许宿主对已确认的文件变更提供 `renderFileChange`，只在该工具展开时挂载，聚合内沿同一槽传递；不为失败／未知工具建立成功diff。[FileDiff](src/desktop/FileChanges.tsx)默认双栏，可切换统一视图，使用真实行号、轻量语法色、低饱和增删底色与空侧纹理；[模型](src/desktop/file-diff-model.ts)只解析原操作预览或标准Git patch，不读磁盘、不重建缺失内容。操作上下文未提供旧侧行号时留空，未知格式保留原文。计数明确为预览增删，不能当作整个文件或仓库统计；已保留的连续上下文可折叠／展开，后端省略的行明确不可展开。
 
-解析最多64 KiB／400行，每行最多2048个UTF-16单元，裁剪保持代理对。轻量词法着色每行最多48个着色token、整份最多1024个着色token，另有每行纯文本回退；双栏复用模型且最多生成2048个着色span；长行或预算用尽时回退纯文本，不加载异步语言包。切换布局和折叠不重读正文，一个ScrollArea同时滚动两侧，保留Home／End交接；不为每行建立滚动器。`layout/onLayoutChange`可由宿主管理，文件切换清除旧折叠，宿主可保留当前视图布局选择。[独立样式](src/desktop/file-diff.css)由style.css导入，正式UI构建同时复制该文件。
+解析最多64 KiB／400行，每行最多2048个UTF-16单元，裁剪保持代理对。轻量词法着色每行最多48个着色token、整份最多1024个着色token，另有每行纯文本回退；双栏复用模型且最多生成2048个着色span；长行或预算用尽时回退纯文本，不加载异步语言包。切换布局和折叠沿用同一份正文，一个 ScrollArea 同时滚动两侧，保留 Home／End 交接。工作区 Git 预览根据原区块头计算行号，展示时省略文件头和区块头，后续区块以分隔线标识。双栏长行在各侧换行，并保持同一行对齐。工作区统一视图从差异正文开始，使用单列行号，删除行取旧行号，新增和未变更行取当前行号。`layout/onLayoutChange`可由宿主管理，文件切换清除旧折叠，宿主可保留当前视图布局选择。[独立样式](src/desktop/file-diff.css)由style.css导入，正式UI构建同时复制该文件。
 
 原SessionPage中的宿主变更工作区允许右栏扩至85%，首次可见变更页按62%准备阅读宽度；同scope后续选择、刷新和重开保留用户宽度，用户先自行调整时不再覆盖，关闭／切scope／覆盖会取消未执行的尺寸操作。这些最小／最大尺寸属于共享右栏，因此同宿主中的浏览器和子页沿用该范围；62%的首次尺寸准备只针对变更页，不主动调整其他页。没有宿主变更内容的浏览器右栏仍为300px／640px约束。[布局回归](test/isolated/desktop-changes-layout.test.tsx)、[解析回归](test/desktop-file-diff-model.test.ts)和[差异滚动回归](test/isolated/desktop-file-diff-scroll.test.tsx)分别负责宿主布局、有限模型与阅读交接。历史来源、Git状态、取消及实际窗口资格归[Desktop owner](../../apps/desktop/README.md#原文件变更面板与编辑器)。
 
