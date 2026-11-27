@@ -355,7 +355,7 @@ test('an open standalone tool keeps its detail when a new step joins the trace',
   });
 });
 
-test('conversation trace keeps the first tool icon as the active title changes and uses a bulb for reasoning', () => {
+test('conversation trace shows progress on the active header and restores its original icon', () => {
   const thought = { ...thinking('run'), reasoningSource: 'original-thought' };
   const read: Message = {
     id: 'read',
@@ -420,7 +420,16 @@ test('conversation trace keeps the first tool icon as the active title changes a
     );
   };
 
-  expectIcon(traceHeadings(renderTrace([thought]))[0]!, BulbIcon);
+  const expectProgress = (line: Element) => {
+    const marker = line.firstElementChild!;
+    expect(marker.getAttribute('data-slot')).toBe('trace-icon');
+    expect(marker.getAttribute('aria-hidden')).toBe('true');
+    const sparkles = marker.querySelector('svg.conversation-trace-progress')!;
+    expect(sparkles.querySelector('path.conversation-trace-star')).not.toBeNull();
+    expect(sparkles.querySelector('path.conversation-trace-spark')).not.toBeNull();
+    expect(sparkles.querySelector('path.conversation-trace-dot')).not.toBeNull();
+  };
+  expectProgress(traceHeadings(renderTrace([thought]))[0]!);
   const completedThought = traceHeadings(renderTrace([complete(thought)]))[0]!;
   expect(completedThought.textContent).toBe('已思考');
   expectIcon(completedThought, BulbIcon);
@@ -428,11 +437,8 @@ test('conversation trace keeps the first tool icon as the active title changes a
   const running = renderTrace([complete(thought), read, shell]).querySelector(summary)!;
   expect(running.textContent).toBe('运行命令');
   expect(running.getAttribute('data-status')).toBe('running');
-  expectIcon(running, BookOpen01Icon);
-  expectIcon(
-    renderTrace([complete(thought), read, complete(shell)]).querySelector(summary)!,
-    BookOpen01Icon,
-  );
+  expectProgress(running);
+  expectProgress(renderTrace([complete(thought), read, complete(shell)]).querySelector(summary)!);
 
   const grouped = renderTrace([complete(thought), complete(read), complete(shell)], true);
   expectIcon(grouped.querySelector(summary)!, BookOpen01Icon);
@@ -1195,11 +1201,12 @@ test('tool handoff retains the latest message until a reply or terminal ends the
     settled: false,
     streaming: true,
   };
-  for (const [status, tail, expected] of [
-    ['running', pending, '已运行 printf second'],
-    ['waiting', pending, '已运行 printf second'],
-    ['running', reply, '读取了文件运行了命令'],
-    ['completed', pending, '读取了文件运行了命令'],
+  for (const [status, tail, expected, showProgress] of [
+    ['running', pending, '已运行 printf second', true],
+    ['waiting', pending, '已运行 printf second', false],
+    ['cancelling', pending, '已运行 printf second', false],
+    ['running', reply, '读取了文件运行了命令', false],
+    ['completed', pending, '读取了文件运行了命令', false],
   ] as const) {
     const dom = new JSDOM(
       renderToStaticMarkup(
@@ -1218,6 +1225,7 @@ test('tool handoff retains the latest message until a reply or terminal ends the
     const heading = dom.window.document.querySelector('.conversation-trace > button')!;
     expect(heading.textContent).toBe(expected);
     expect(heading.querySelector('[data-status="running"]')).toBeNull();
+    expect(heading.querySelector('.conversation-trace-progress') !== null).toBe(showProgress);
     dom.window.close();
   }
 });
@@ -1925,8 +1933,10 @@ test('exact pending answers and approvals outrank parallel activity and withdraw
     );
     const title = traceHeadings(dom.window.document)[0];
     expect(title?.textContent).toBe(expected);
-    if (expected.startsWith('等待') || unconfirmed)
+    if (expected.startsWith('等待') || unconfirmed) {
       expect(title?.getAttribute('data-status')).not.toBe('running');
+      expect(title?.querySelector('.conversation-trace-progress')).toBeNull();
+    }
     const row = dom.window.document.querySelector(
       '.conversation-reasoning [data-slot="trace-title"]',
     );

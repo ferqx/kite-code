@@ -1601,6 +1601,10 @@ export function Conversation({
                     : '已思考');
           const boundary = blocks[index - 1]?.[0];
           const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
+          const running = !interaction && (!!runningTool || !!activeReasoning);
+          const showProgress =
+            running ||
+            (!interaction && currentTrace && turnActive && activity?.status === 'running');
           if (open && expanded[id] === true) trackOpen(id);
           return (
             <ConversationTrace
@@ -1608,7 +1612,8 @@ export function Conversation({
               id={id}
               steps={steps}
               label={summary}
-              running={!interaction && (!!runningTool || !!activeReasoning)}
+              running={running}
+              showProgress={showProgress}
               activeReasoning={activeReasoning}
               interactionTitle={interaction}
               summarizeTools={completedSummary}

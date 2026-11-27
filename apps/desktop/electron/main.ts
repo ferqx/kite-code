@@ -674,7 +674,7 @@ void app
             titleBarOverlay: {
               color: '#00000000',
               symbolColor: nativeTheme.shouldUseDarkColors ? '#eeeeee' : '#222222',
-              height: 32,
+              height: process.platform === 'win32' ? 40 : 32,
             },
           }),
       show: false,

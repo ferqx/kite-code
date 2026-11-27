@@ -6,6 +6,20 @@
 
 2026-11-18，macOS arm64／Bun 1.4.4，`237b0983` 加本任务工作树：[Native DOM 回归](test/isolated/native-transcript-dom.test.tsx)整文件 34 项通过，共 840 断言；新增图片失败用例覆盖九种 reason、冷重投影、原轮次顺序、一个错误块及未知代码回退。Desktop 类型检查 1,685 文件与三个变更源码／测试文件的 Biome 检查通过。此为真实组件 DOM 验证，不代替原生窗口／供应商故障验收。
 
+## 主窗口导航
+
+页面历史由主窗口 Renderer 按当前 Store 保存页面身份和游标。会话选择和搜索结果复用原 `onOpen/select`，新对话和定时任务复用原入口。首条提交由原新对话页面交接为持久会话时替换该条历史。后退和前进只移动游标，随后普通导航会清除旧前进记录。每次遍历按当前已核实的目录查找可访问目标，并沿原选择代次重读。设置和搜索浮层、右侧标签各自管理打开状态。窗口重建从当前页面重新开始记录。 [页面历史](src/native-page-history.ts) · [主页面](src/native.tsx)
+
+Windows 在「帮助」右侧按侧栏收展、后退和前进排列。共享页面根据侧栏宽度过渡的完成状态挂载搜索入口。展开完成后入口在「Kite」标题行右端，收起完成后在顶栏前进按钮右侧。启用减少动态效果时直接采用目标位置。关闭搜索时将焦点恢复到当前可用的入口。macOS 在原生窗口按钮之后放置四个控件，标题为固定控件区域留位。缓存会话进入可操作状态时沿用同一排队编辑焦点标识，避免标题栏焦点被核对完成事件移到输入框。 [窗口标题栏](src/native-window-frame.tsx) · [会话外壳](../../packages/ui/src/desktop/SessionPage.tsx)
+
+Windows 的系统标题栏区域高 40px，应用按钮和菜单在同一行居中，正文区域从标题栏底边开始。Renderer 优先使用原生覆盖区报告的高度，默认按 40px 布局。Windows 菜单文字沿用共享 UI 的 `--ui-text-size`，macOS 和 Windows 顶栏图标按钮与「添加项目」共用 `--icon-button-size-sm` 和 `--ui-icon-size`。 [窗口配置](electron/main.ts) · [标题栏样式](src/native-tailwind.css)
+
+2026-11-27 在 Windows Electron 44.3.0 的隔离 Root 窗口实测。深色 800px 窗口和切为浅色后拉宽至 1100px 时，搜索按钮与「Kite」垂直中心对齐，右侧留 10px，按钮为 28×28px、图标为 14px。展开侧栏时从标题行打开搜索，收起后从顶栏打开搜索，关闭后焦点分别回到当前入口。顶栏导航的上下留白为 6px，从「帮助」到前进的相邻控件间距为 8px。Chromium 158 浏览器夹具逐帧确认侧栏开合只有一个搜索入口，并覆盖 macOS 布局、会话往返和窗口重载。搜索动作由隔离夹具回传。 [浏览器回归](test/session-shell-browser-runner.fixture.ts)
+
+2026-11-27 在 Windows x64 使用 Chromium 158 的隔离构建验证 Windows 和 macOS 两种布局，逐帧核对侧栏开合、切换标题、正文身份、阅读位置及箭头焦点。另在隔离 Electron 44.3.0 窗口核对系统标题栏可用矩形、收起状态搜索入口和焦点恢复、鼠标后退及键盘前进。搜索浮层的关闭动作由夹具回传，macOS 实窗和安装版资格仍待验证。DOM 回归覆盖首条提交交接、迟到选择响应、断线恢复和分叉后的前进记录。启动恢复草稿与定时任务回归中各一条旧断言在 `17dcef51f` 基线同样失败。 [浏览器回归](test/session-shell-browser-runner.fixture.ts) · [页面历史回归](test/isolated/native-session-shell-dom.test.tsx) · [首条提交回归](test/isolated/native-new-conversation-dom.test.tsx)
+
+收展时机补验使用 `17dcef51f` 加当前工作树。Windows 隔离 Electron 窗口的 24 帧收起过程中顶栏搜索保持隐藏，收起完成后可打开搜索，关闭时焦点回到入口。Chromium 158 的 `--page-navigation` 回归另覆盖延长动画、收起途中重新展开、减少动态效果及 macOS 布局。 [浏览器回归](test/sidebar-actions-browser.fixture.ts)
+
 ## 侧栏会话搜索
 
 [NativeCaller](electron/native-caller.ts)原目录读取穷尽工作区与会话分页，完整成功后发布，失败不发布前缀目录。[NativeDesktop](src/native.tsx)据连接代次／Store、目录状态与当前代次的直接读取失败接入共享侧栏搜索，没有新增 Workbench 路由、后端搜索或消息正文读取。[目录投影](src/native-presentation.ts)保留登记 `rootUri` 以辨识同名项目；打开结果复用原 `onOpen/select`。桌面搜索复用[原生模态底座](electron/native-modal-surface.ts)，使用[独立搜索视图](src/native-session-search-main.tsx)与[受限 IPC](electron/native-session-search-host.ts)；[Root 适配](src/native-session-search.tsx)持有目录、搜索排序与导航，每次最多传 50 条展示信息，搜索面板按滚动或键盘操作将后续结果追加到同一个列表。空查询只列出最近 7 天更新的会话。选择经 Main 核对当前结果快照和已发布批次，目录变化后淘汰旧批次。结果时间沿目录的最近活动时间，IPC 传可选有限时间戳；缺失或无效时不显示，不以创建时间代替。搜索视图不具备 Service 或浏览器控制能力。搜索位于右侧网页和文件原生视图之上、权限确认与图片预览之下，不改变底层视图的可见性、几何或浏览器操作凭据。共享 Web 继续使用[本地搜索对话框](../../packages/ui/src/desktop/SessionSearch.tsx)。
@@ -689,11 +703,15 @@ Windows Mica 与 macOS Vibrancy 窗口的[启动样式](src/native-startup.css)�
 
 [启动入口](src/native-main.tsx)先提交同一[启动外框](src/native-startup-frame.tsx)，并行读取可选窗口材质，在 Electron 首次窗口加载事件后导入工作区模块。材质尚未返回时使用主题背景。模块加载失败可在启动页重试整个文档。[NativeStartup](src/native-startup.tsx)继续负责服务初始化的进度、诊断和重试。[正式入口](src/native.tsx)完成 Main attach 和首屏 Workspace／Session 目录观察后显示 SessionPage，空目录与未配置模型可以进入处理。
 
+启动页的尺寸按边框盒计算。初次渲染用视口高度，进入窗口外壳后使用内容区高度。内边距计入这两个尺寸，失败内容超高时在启动页内部滚动。 [启动样式](src/native-startup.css) · [窗口容器尺寸](src/native-tailwind.css)
+
+2026-11-27 在 Windows Electron 44.3.0 的隔离窗口加载生产 renderer，延迟工作区载入并控制首次 attach 失败。共采集 85 帧，首次外框、等待服务、失败、重试和进入主界面期间，文档高度与视口一致。将失败页缩至 180px 高时，启动内容区可以滚动，键盘聚焦可见的重试按钮并按 Enter 后进入主界面。
+
 2026-11-26，Windows x64／Electron 44.3.0 隔离 Profile 实窗在工作区脚本的首次请求被延迟并取消时，依次显示启动外框和失败提示。按 Enter 后再次显示启动外框，工作区正常接管，窗口材质 IPC 此时尚未返回。延迟和失败由隔离夹具注入。
 
 2026-11-25 在 Windows x64 的隔离 Electron 窗口中加载正式构建的渲染器，控制启动桥接结果，依次确认首次加载、失败、重试和进入主界面。每次显示启动页时只有一个 56px 白底图标，渲染资源与桌面 ICO 字节一致。
 
-[窗口容器](src/native-window-frame.tsx)在准备中、启动失败和重试时使用 `showHeader=false`，不渲染自绘顶栏与 Windows 菜单，也不监听 F10／Alt 菜单导航；内容区使用整个窗口高度。缺 bridge 的失败页使用同一显示规则。完整首屏目录观察通过后恢复32px顶栏与菜单；进入主界面后的连接失败沿原逻辑保留页面和顶栏。Main 继续负责原生窗口按钮，服务准入、诊断、重试和退出沿原端口。
+[窗口容器](src/native-window-frame.tsx)在准备中、启动失败和重试时使用 `showHeader=false`，不渲染自绘顶栏与 Windows 菜单，也不监听 F10／Alt 菜单导航；内容区使用整个窗口高度。缺 bridge 的失败页使用同一显示规则。完整首屏目录观察通过后显示顶栏与菜单。进入主界面后的连接失败沿原逻辑保留页面和顶栏。Main 继续负责原生窗口按钮，服务准入、诊断、重试和退出沿原端口。
 
 2026-10-14 Windows x64／Bun 1.4.2，`5f41fc3d` 加菜单及启动 header 调整：[启动 DOM](test/isolated/native-startup-dom.test.tsx)与[窗口动作 DOM](test/isolated/native-window-actions-dom.test.tsx)两个完整文件4项／90断言通过，覆盖准备中及首屏目录等待、启动失败、重试、进入应用后恢复菜单、隐藏时菜单快捷键零宿主调用，以及迟到观察、后续连接错误和原草稿。Desktop typecheck、定向 Biome、文档结构与影响核对通过；Biome 保留原未改动 fragment 提示。本次未重新运行真实窗口或完整默认测试，下面既有窗口证据不代证本次启动 header 显隐。
 
@@ -817,7 +835,7 @@ Windows 导航的 [Native CSS](src/native-tailwind.css) 将宽侧栏和窄窗口
 
 设置通过[独立浮窗](#设置浮窗)合成，主页面保持挂载以保留草稿、阅读位置和面板状态。
 
-Windows 的 `.native-window-content` 由平台样式统一保留四周 6px 留白。Windows 10、Windows 11 与实色回退都使用相同的三栏圆角外框和 32px 独立顶栏。内部 `.client-content-frame` 宽高占满、外边距为 0，左侧导航和右侧工具仍沿原分隔线开合和调宽。工作区内的标题和收展按钮不重复计算外层留白。[设置浮窗](#设置浮窗)沿独立视图尺寸渲染。macOS 保持 0px 外留白和直角铺满。
+Windows 10、Windows 11 与实色回退使用相同的三栏圆角外框和 40px 独立顶栏。顶栏显示后，`.native-window-content` 与顶栏底边相接，两侧和底部各留 6px。内部 `.client-content-frame` 宽高占满、外边距为 0，左侧导航和右侧工具仍沿原分隔线开合和调宽。工作区内的标题和收展按钮不重复计算外层留白。[设置浮窗](#设置浮窗)沿独立视图尺寸渲染。macOS 保持 0px 外留白和直角铺满。
 
 生产样式浏览器回归在 800px 和 1280px 窗宽、深浅主题和宽窗右栏开合状态下，对照 Mica、Acrylic 与实色分支的顶栏、外框、导航、会话和右栏几何。三种分支的尺寸和描边相同，只有玻璃分支为导航启用背景模糊。[侧栏浏览器回归](test/isolated/sidebar-actions-browser.test.ts)
 

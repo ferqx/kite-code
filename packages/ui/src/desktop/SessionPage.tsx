@@ -1,12 +1,14 @@
 import {
   ListIcon,
   PanelLeftCloseIcon,
+  PanelLeftIcon,
   PanelLeftOpenIcon,
   PanelRightIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { ComponentProps, CSSProperties, ReactNode, SyntheticEvent } from 'react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { PanelImperativeHandle } from 'react-resizable-panels';
 import { Composer, type ComposerProps } from './Composer';
 import type { ToolActivityState } from './Conversation';
@@ -227,6 +229,11 @@ function PrepareConversationLayout({ prepare }: { prepare: () => void }) {
 export interface SessionPageProps {
   /** Opt in only when the host reads the full directory, never a loaded prefix. */
   sessionSearch?: Parameters<typeof Sidebar>[0]['sessionSearch'];
+  windowNavigationHosts?: {
+    sidebar: HTMLElement | null;
+    search: HTMLElement | null;
+    searchInSidebarHeader?: boolean;
+  };
   workspaces: readonly WorkspaceSummary[];
   selected?: string;
   /** Confirmed navigation row while its conversation frame is still preparing. */
@@ -373,7 +380,11 @@ function SessionPageContent({
     else queueMicrotask(focus);
   }, []);
   const [sidebarOpen, setSidebarOpenIntent] = useState(true);
-  const [navigationAnimating, setNavigationAnimating] = useState(false);
+  const [navigationAnimationTarget, setNavigationAnimationTarget] = useState<boolean>();
+  const navigationAnimating = navigationAnimationTarget !== undefined;
+  const [sidebarHeaderSearchHost, setSidebarHeaderSearchHost] = useState<HTMLDivElement | null>(
+    null,
+  );
   const [detailsAnimation, setDetailsAnimation] = useState<{ scope?: string }>();
   const navigationWidth = useRef(savedNavigationWidth());
   const navigationPanel = useRef<PanelImperativeHandle>(null);
@@ -381,7 +392,6 @@ function SessionPageContent({
   const panelGroupElement = useRef<HTMLDivElement>(null);
   const contentGroupElement = useRef<HTMLDivElement>(null);
   const navigationPanelFrame = useRef<number | undefined>(undefined);
-  const navigationAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsPanelFrame = useRef<number | undefined>(undefined);
   const [pendingTabsClose, setPendingTabsClose] = useState<{ scope?: string; id: string }>();
@@ -649,13 +659,7 @@ function SessionPageContent({
           return;
         // Navigation uses explicit size constraints; only its button changes them.
         if (panel === navigationPanel) {
-          setNavigationAnimating(true);
-          if (navigationAnimationTimer.current !== undefined)
-            clearTimeout(navigationAnimationTimer.current);
-          navigationAnimationTimer.current = setTimeout(() => {
-            navigationAnimationTimer.current = undefined;
-            setNavigationAnimating(false);
-          }, 240);
+          setNavigationAnimationTarget(open);
           return;
         }
         startDetailsAnimation(scope);
@@ -684,18 +688,44 @@ function SessionPageContent({
     if (sidebarOpen && group && group.getBoundingClientRect().width > 0)
       navigationPanel.current?.resize(`${navigationWidth.current}px`);
   }, [sidebarOpen]);
+  useLayoutEffect(() => {
+    if (navigationAnimationTarget === undefined) return;
+    let current = true;
+    // The panel library applies the new size before the next frame.
+    const frame = requestAnimationFrame(() => {
+      const panels = panelGroupElement.current?.querySelectorAll(':scope > [data-panel]') ?? [];
+      const transitions = Array.from(panels).flatMap((panel) =>
+        (panel.getAnimations?.() ?? []).filter(
+          (animation) =>
+            'transitionProperty' in animation && animation.transitionProperty === 'flex-grow',
+        ),
+      );
+      if (!transitions.length) {
+        setNavigationAnimationTarget(undefined);
+        return;
+      }
+      void Promise.allSettled(transitions.map((transition) => transition.finished)).then(() => {
+        if (current) {
+          setNavigationAnimationTarget((target) =>
+            target === navigationAnimationTarget ? undefined : target,
+          );
+        }
+      });
+    });
+    return () => {
+      current = false;
+      cancelAnimationFrame(frame);
+    };
+  }, [navigationAnimationTarget]);
   const stopPanelAnimationOnResize = useCallback((event: SyntheticEvent) => {
     if (
       !(event.target instanceof Element) ||
       !event.target.closest('[data-slot="resizable-handle"]')
     )
       return;
-    if (navigationAnimationTimer.current !== undefined)
-      clearTimeout(navigationAnimationTimer.current);
-    navigationAnimationTimer.current = undefined;
     if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
     detailsAnimationTimer.current = undefined;
-    setNavigationAnimating(false);
+    setNavigationAnimationTarget(undefined);
     setDetailsAnimation(undefined);
   }, []);
   const expandDetails = useCallback(
@@ -1082,8 +1112,6 @@ function SessionPageContent({
       scheduledEditorGeneration.current++;
       if (navigationPanelFrame.current !== undefined)
         cancelAnimationFrame(navigationPanelFrame.current);
-      if (navigationAnimationTimer.current !== undefined)
-        clearTimeout(navigationAnimationTimer.current);
       if (detailsAnimationTimer.current !== undefined) clearTimeout(detailsAnimationTimer.current);
       if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
       if (environmentAnimationTimer.current !== undefined)
@@ -1226,7 +1254,6 @@ function SessionPageContent({
     setEnvironmentPreference('default');
   }, [environmentFits, environmentMode]);
   const readings = useRef(new ReadingStateCache());
-  const toggle = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const cancel = (event: KeyboardEvent) => {
       if (
@@ -1262,16 +1289,53 @@ function SessionPageContent({
     props.onHeaderMouseDown?.(event.detail);
   };
   const navigation = useNavigationCallbacks(props, focusComposerAfterCommit);
+  const sidebarToggle = (
+    <Button
+      className="ghost sidebar-toggle"
+      size="icon"
+      aria-controls="navigation"
+      aria-expanded={sidebarOpen}
+      aria-label={sidebarOpen ? '收起侧栏' : '展开侧栏'}
+      title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
+      disabled={props.covered}
+      onClick={() => setSidebarOpen(!sidebarOpen)}
+    >
+      <HugeiconsIcon
+        icon={
+          props.windowNavigationHosts
+            ? PanelLeftIcon
+            : sidebarOpen
+              ? PanelLeftCloseIcon
+              : PanelLeftOpenIcon
+        }
+        aria-hidden="true"
+      />
+    </Button>
+  );
+  const windowSearchHost = props.windowNavigationHosts?.search;
+  const sidebarSearchHost = navigationAnimating
+    ? null
+    : sidebarOpen
+      ? sidebarHeaderSearchHost
+      : windowSearchHost;
   const sidebarPanel = (
     <div className="client-sidebar-panel">
       {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
       <header className="sidebar-header" onMouseDown={handleHeaderMouseDown}>
         <strong className="brand">Kite</strong>
+        {props.windowNavigationHosts?.searchInSidebarHeader && (
+          <div className="sidebar-header-search" ref={setSidebarHeaderSearchHost} />
+        )}
       </header>
       <aside className="sidebar" aria-label="项目与会话">
         <MemoizedSidebar
           workspaces={props.workspaces}
           sessionSearch={props.covered ? undefined : props.sessionSearch}
+          searchTriggerHost={
+            props.windowNavigationHosts?.searchInSidebarHeader
+              ? sidebarSearchHost
+              : windowSearchHost
+          }
           selectedWorkspace={
             !props.workbench && !props.scheduledTasks && !props.sidebarSelected
               ? props.workspaces.find(
@@ -1556,21 +1620,14 @@ function SessionPageContent({
           data-open={sidebarOpen ? 'true' : 'false'}
           withHandle
         />
-        {/* Follow the panel boundary without clipping or replacing the focused control. */}
-        <div className="desktop-sidebar-toggle" data-open={sidebarOpen ? 'true' : undefined}>
-          <Button
-            ref={toggle}
-            className="ghost sidebar-toggle"
-            size="icon"
-            aria-controls="navigation"
-            aria-expanded={sidebarOpen}
-            aria-label={sidebarOpen ? '收起侧栏' : '展开侧栏'}
-            title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-          >
-            <HugeiconsIcon icon={sidebarOpen ? PanelLeftCloseIcon : PanelLeftOpenIcon} />
-          </Button>
-        </div>
+        {props.windowNavigationHosts ? (
+          props.windowNavigationHosts.sidebar &&
+          createPortal(sidebarToggle, props.windowNavigationHosts.sidebar)
+        ) : (
+          <div className="desktop-sidebar-toggle" data-open={sidebarOpen ? 'true' : undefined}>
+            {sidebarToggle}
+          </div>
+        )}
         <ResizablePanel
           id="workspace"
           {...workspaceSizing}
@@ -1634,10 +1691,12 @@ function SessionPageContent({
                     onMouseDown={handleHeaderMouseDown}
                   >
                     <div className="session-header-heading">
-                      <div
-                        className="session-sidebar-toggle"
-                        data-open={!sidebarOpen ? 'true' : undefined}
-                      />
+                      {!props.windowNavigationHosts && (
+                        <div
+                          className="session-sidebar-toggle"
+                          data-open={!sidebarOpen ? 'true' : undefined}
+                        />
+                      )}
                       <div className="breadcrumb">
                         {props.scheduledTasks ? (
                           <strong>定时任务</strong>

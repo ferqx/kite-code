@@ -1,8 +1,10 @@
 .desktop-startup {
-  min-height: 100dvh;
+  box-sizing: border-box;
+  height: 100dvh;
   display: grid;
   place-items: center;
   padding: 32px;
+  overflow: auto;
 }
 html[data-native-window]:is(
     [data-window-material="mica"],

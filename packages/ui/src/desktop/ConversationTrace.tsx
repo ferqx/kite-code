@@ -62,12 +62,45 @@ export function latestRunningTraceTool(steps: readonly Message[]) {
   return tool;
 }
 
+function TraceProgress() {
+  return (
+    <svg
+      className="conversation-trace-progress shrink-0"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        className="conversation-trace-star"
+        d="M12 3.3 Q12.48 3.3 12.68 4.05 Q13.93 9.62 19.95 11.38 Q20.7 11.58 20.7 12 Q20.7 12.42 19.95 12.62 Q13.93 14.38 12.68 19.95 Q12.48 20.7 12 20.7 Q11.52 20.7 11.32 19.95 Q10.07 14.38 4.05 12.62 Q3.3 12.42 3.3 12 Q3.3 11.58 4.05 11.38 Q10.07 9.62 11.32 4.05 Q11.52 3.3 12 3.3Z"
+      />
+      <path
+        className="conversation-trace-spark"
+        d="M20.25 0.95 Q20.76 3.25 23.05 3.75 Q20.76 4.25 20.25 6.55 Q19.74 4.25 17.45 3.75 Q19.74 3.25 20.25 0.95Z"
+        fill="currentColor"
+        stroke="none"
+      />
+      <path
+        className="conversation-trace-dot"
+        d="M3.4 19.1 L4.7 20.4 3.4 21.7 2.1 20.4Z"
+        fill="currentColor"
+        stroke="none"
+      />
+    </svg>
+  );
+}
+
 /** A closed trace owns only its summary. Each opened step keeps its own identity. */
 export function ConversationTrace({
   steps,
   id,
   label,
   running,
+  showProgress,
   activeReasoning,
   interactionTitle,
   summarizeTools,
@@ -83,6 +116,7 @@ export function ConversationTrace({
   id: string;
   label: string;
   running: boolean;
+  showProgress: boolean;
   activeReasoning?: Message;
   interactionTitle?: string;
   summarizeTools: boolean;
@@ -142,7 +176,7 @@ export function ConversationTrace({
       }
     >
       <TraceIcon>
-        <HugeiconsIcon icon={summaryIcon} />
+        {showProgress ? <TraceProgress /> : <HugeiconsIcon icon={summaryIcon} />}
       </TraceIcon>
       <TraceTitle title={summaryLabel} aria-live="polite" aria-atomic="true">
         {summaryLabel}
@@ -165,6 +199,7 @@ export function ConversationTrace({
           className="conversation-trace-trigger"
           aria-controls={panelId}
           aria-expanded={open}
+          aria-description={showProgress ? '进行中' : undefined}
           onClick={() => onToggle(id, !open)}
         >
           {summary}
@@ -210,7 +245,11 @@ export function ConversationTrace({
                   status={thinking ? 'running' : undefined}
                 >
                   <TraceIcon>
-                    <HugeiconsIcon icon={BulbIcon} />
+                    {!grouped && thinking && showProgress ? (
+                      <TraceProgress />
+                    ) : (
+                      <HugeiconsIcon icon={BulbIcon} />
+                    )}
                   </TraceIcon>
                   <TraceTitle aria-live={grouped ? undefined : 'polite'}>
                     {thinking ? '思考中' : '已思考'}

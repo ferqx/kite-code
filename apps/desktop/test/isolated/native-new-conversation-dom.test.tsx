@@ -2481,7 +2481,8 @@ test('a confirmed first Session row is selected before its send receipt and prep
   for (const held of ['selection', 'models'] as const) {
     const f = fixture(true);
     try {
-      await act(async () => f.root.render(<NativeDesktop />));
+      await act(async () => f.root.render(<NativeDesktop nativeWindow />));
+      await f.until(() => !!f.host.querySelector('.native-window-titlebar'));
       await f.click('在 Workspace 中新建对话');
       await f.edit('first input with a delayed handoff');
       await f.chooseModel();
@@ -2522,6 +2523,14 @@ test('a confirmed first Session row is selected before its send receipt and prep
       expect(promptValue(editor)).toBe('next editable prompt');
       expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
       expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(0);
+      await f.click('后退');
+      await f.until(() => f.host.querySelector('.breadcrumb strong')?.textContent === 'Original A');
+      await f.click('前进');
+      await f.until(
+        () => f.selected() === send.creation.sessionId && !!f.input('当前会话私有草稿'),
+      );
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe('next editable prompt');
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
     } finally {
       await f.releaseSelection();
       await f.releaseModels();

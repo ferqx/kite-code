@@ -3,6 +3,305 @@ import path from 'node:path';
 import { type Browser, expect, type Locator, type Page } from 'playwright/test';
 import type {} from './session-shell-browser.fixture';
 
+export async function verifyPageNavigation(browser: Browser, url: string, artifact: string) {
+  const cases = [];
+  for (const platform of ['windows', 'macos'] as const) {
+    const page = await browser.newPage({
+      viewport: { width: 800, height: 730 },
+      colorScheme: platform === 'windows' ? 'dark' : 'light',
+    });
+    const errors: string[] = [];
+    page.on('pageerror', (cause) => errors.push(cause.message));
+    try {
+      await page.goto(`${url}?page-navigation=${platform}`);
+      const bar = page.locator('.native-window-titlebar');
+      const back = bar.getByRole('button', { name: '后退', exact: true });
+      const forward = bar.getByRole('button', { name: '前进', exact: true });
+      const toggle = bar.locator('.sidebar-toggle');
+      const search = page.getByRole('button', { name: '搜索会话', exact: true });
+      const sidebarHeader = page.locator('#navigation .sidebar-header');
+      const sidebarSearch = sidebarHeader.getByRole('button', { name: '搜索会话', exact: true });
+      const titlebarSearch = bar.getByRole('button', { name: '搜索会话', exact: true });
+      const draft = page.locator('.composer .prompt-editor');
+      const title = page.locator('.breadcrumb strong');
+      const content = (id: string) => page.getByText(`Question ${id}`, { exact: true });
+      await expect(content('a')).toBeVisible();
+      await expect(draft).toBeEditable();
+      await expect(back).toBeDisabled();
+      await expect(forward).toBeDisabled();
+      if (platform === 'windows') {
+        await expect(sidebarSearch).toBeVisible();
+        const placement = await sidebarHeader.evaluate((node) => {
+          const brand = node.querySelector('.brand')!.getBoundingClientRect();
+          const search = node.querySelector('button')!.getBoundingClientRect();
+          const boundary = node.getBoundingClientRect();
+          return {
+            afterBrand: search.left >= brand.right,
+            centered: search.top + search.height / 2 === brand.top + brand.height / 2,
+            inset: boundary.right - search.right,
+            size: [search.width, search.height],
+          };
+        });
+        assert.deepEqual(placement, {
+          afterBrand: true,
+          centered: true,
+          inset: 10,
+          size: [28, 28],
+        });
+        await sidebarHeader.screenshot({ path: path.join(artifact, 'windows-sidebar-search.png') });
+        await sidebarSearch.click();
+        await expect(sidebarSearch).toHaveAttribute('aria-expanded', 'true');
+        await page.evaluate(() => window.dismissFixtureSearch?.());
+        await expect(sidebarSearch).toBeFocused();
+      } else {
+        await expect(titlebarSearch).toBeVisible();
+      }
+      await draft.fill('Draft stays with A');
+      await page.locator('.conversation').evaluate((node) => {
+        node.scrollTop = 0;
+      });
+      const before = await bar.evaluate((node) => {
+        const buttons = [...node.querySelectorAll('button')].map((button) => {
+          const { x, y, width, height } = button.getBoundingClientRect();
+          const icon = button.querySelector('svg')?.getBoundingClientRect();
+          const style = getComputedStyle(button);
+          return {
+            name: button.getAttribute('aria-label') ?? button.textContent,
+            x,
+            y,
+            size: [width, height],
+            right: x + width,
+            centerY: y + height / 2,
+            iconSize: icon ? [icon.width, icon.height] : undefined,
+            iconCenterY: icon ? icon.y + icon.height / 2 : undefined,
+            iconInlineInset: icon ? [icon.left - x, x + width - icon.right] : undefined,
+            fontSize: style.fontSize,
+            appRegion: style.getPropertyValue('-webkit-app-region'),
+          };
+        });
+        const navigation = node.querySelector('nav')!;
+        const add = document.querySelector('.nav-label .space-add')!;
+        const addBounds = add.getBoundingClientRect();
+        const addIcon = add.querySelector('svg')!.getBoundingClientRect();
+        return {
+          buttons,
+          top: node.getBoundingClientRect().top,
+          bottom: node.getBoundingClientRect().bottom,
+          contentTop: document
+            .querySelector('.native-window-content > .kite-client.shell')!
+            .getBoundingClientRect().top,
+          addProjectSize: [addBounds.width, addBounds.height],
+          addProjectInlineInset: [addIcon.left - addBounds.left, addBounds.right - addIcon.right],
+          drag: getComputedStyle(node).getPropertyValue('-webkit-app-region'),
+          navigationRight: navigation.getBoundingClientRect().right,
+        };
+      });
+      assert.deepEqual(
+        before.buttons.map(({ name }) => name),
+        platform === 'windows'
+          ? ['文件', '编辑', '视图', '帮助', '收起侧栏', '后退', '前进']
+          : ['收起侧栏', '后退', '前进', '搜索会话'],
+      );
+      const rowY = before.buttons[0]!.centerY;
+      assert.ok(
+        before.buttons.every(
+          ({ centerY, appRegion }) => centerY === rowY && appRegion === 'no-drag',
+        ),
+      );
+      assert.equal(before.drag, 'drag');
+      const iconButtons = before.buttons.filter(({ iconSize }) => iconSize !== undefined);
+      assert.equal(iconButtons.length, platform === 'windows' ? 3 : 4);
+      for (const button of iconButtons) {
+        assert.deepEqual(button.iconSize, [14, 14]);
+        assert.deepEqual(button.size, before.addProjectSize);
+        assert.deepEqual(button.iconInlineInset, before.addProjectInlineInset);
+        assert.equal(button.iconCenterY, rowY);
+        assert.equal(button.y - before.top, before.bottom - button.y - button.size[1]!);
+      }
+      if (platform === 'macos') {
+        assert.deepEqual(
+          iconButtons.map(({ x }) => x),
+          [104, 138, 172, 206],
+        );
+      } else {
+        for (const button of iconButtons) {
+          assert.equal(button.y - before.top, 6);
+          assert.equal(before.contentTop - button.y - button.size[1]!, 6);
+        }
+        const menuButtons = before.buttons.filter(({ iconSize }) => iconSize === undefined);
+        assert.equal(menuButtons.length, 4);
+        for (const button of menuButtons) assert.equal(button.fontSize, '14px');
+        const adjacent = [menuButtons[3]!, ...iconButtons];
+        for (let index = 1; index < adjacent.length; index++)
+          assert.equal(adjacent[index]!.x - adjacent[index - 1]!.right, 8);
+      }
+      await bar.screenshot({ path: path.join(artifact, `page-navigation-${platform}.png`) });
+
+      await page.evaluate(() => {
+        const frames: {
+          title: string;
+          x: number;
+          searchCount: number;
+          titlebarSearch: boolean;
+          sidebarWidth: number;
+          sidebarOpen: boolean;
+          searchRight: number;
+          titleLeft: number;
+          rows: string[];
+        }[] = [];
+        const tick = () => {
+          const title = document.querySelector('.breadcrumb strong');
+          const toggle = document.querySelector('.native-window-titlebar .sidebar-toggle');
+          const sidebar = document.querySelector('#navigation');
+          const searches = document.querySelectorAll('button[aria-label="搜索会话"]');
+          if (title && toggle && sidebar) {
+            const rows = [...document.querySelectorAll('.conversation')].flatMap(
+              (node) => (node.textContent ?? '').match(/Question [ab]/g) ?? [],
+            );
+            frames.push({
+              title: title.textContent ?? '',
+              x: toggle.getBoundingClientRect().x,
+              searchCount: searches.length,
+              titlebarSearch: !!searches[0]?.closest('.native-window-titlebar'),
+              sidebarWidth: sidebar.getBoundingClientRect().width,
+              sidebarOpen: toggle.getAttribute('aria-expanded') === 'true',
+              searchRight: searches[0]?.getBoundingClientRect().right ?? 0,
+              titleLeft: title.getBoundingClientRect().left,
+              rows,
+            });
+          }
+          frame = requestAnimationFrame(tick);
+        };
+        let frame = requestAnimationFrame(tick);
+        Reflect.set(window, 'navigationFrames', () => {
+          cancelAnimationFrame(frame);
+          return frames;
+        });
+      });
+      if (platform === 'windows') {
+        // The search must follow the actual transition even if its duration changes.
+        await page.locator('.kite-client.shell').evaluate((shell) => {
+          (shell as HTMLElement).style.setProperty('--sidebar-motion-duration', '420ms');
+        });
+      }
+      await toggle.click();
+      await expect(toggle).toHaveAccessibleName('展开侧栏');
+      await expect(titlebarSearch).toBeVisible();
+      await expect(toggle).toBeFocused();
+      await search.click();
+      await expect(search).toHaveAttribute('aria-expanded', 'true');
+      await expect(title).toHaveText('Session A');
+      await expect(back).toBeDisabled();
+      await page.evaluate(() => window.dismissFixtureSearch?.());
+      await expect(search).toHaveAttribute('aria-expanded', 'false');
+      await expect(search).toBeFocused();
+      await toggle.click();
+      await expect(toggle).toHaveAccessibleName('收起侧栏');
+      if (platform === 'windows') {
+        await expect(sidebarSearch).toBeVisible();
+        await expect(toggle).toBeFocused();
+        const openWidth = await page.locator('#navigation').evaluate((sidebar) => {
+          return sidebar.getBoundingClientRect().width;
+        });
+        await toggle.click();
+        await page.waitForFunction((width) => {
+          const current = document.querySelector('#navigation')?.getBoundingClientRect().width;
+          return current !== undefined && current > 0 && current < width - 1;
+        }, openWidth);
+        await expect(titlebarSearch).toHaveCount(0);
+        await toggle.click();
+        await expect(sidebarSearch).toBeVisible();
+        await expect(titlebarSearch).toHaveCount(0);
+      }
+      await page.getByRole('button', { name: 'Session B', exact: true }).click();
+      await expect(content('b')).toBeVisible();
+      await expect(draft).toBeEditable();
+      await page.getByRole('button', { name: '定时任务', exact: true }).click();
+      await expect(title).toHaveText('定时任务');
+
+      await page.evaluate(() => window.sessionShellFixture.hold());
+      await back.click();
+      await expect(title).toHaveText('Session B');
+      await page.waitForFunction(() => window.sessionShellFixture.pending('selection') === 1);
+      await expect(content('b')).toBeVisible();
+      await expect(content('a')).toHaveCount(0);
+      await back.click();
+      await expect(title).toHaveText('Session A');
+      await expect(content('a')).toBeVisible();
+      await expect(draft).toHaveText('Draft stays with A');
+      await expect(content('b')).toHaveCount(0);
+      await page.evaluate(() => window.sessionShellFixture.resume());
+      await expect(draft).toBeEditable();
+      await expect(page.locator('.conversation')).toHaveJSProperty('scrollTop', 0);
+      await expect(back).toBeDisabled();
+      await forward.focus();
+      await expect(forward).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(content('b')).toBeVisible();
+      await expect(forward).toBeFocused();
+      await forward.click();
+      await expect(title).toHaveText('定时任务');
+      await expect(forward).toBeDisabled();
+      const frames = (await page.evaluate(() => Reflect.get(window, 'navigationFrames')())) as {
+        title: string;
+        x: number;
+        searchCount: number;
+        titlebarSearch: boolean;
+        sidebarWidth: number;
+        sidebarOpen: boolean;
+        searchRight: number;
+        titleLeft: number;
+        rows: string[];
+      }[];
+      assert.ok(frames.length > 10);
+      if (platform === 'windows') {
+        assert.ok(frames.some((frame) => !frame.sidebarOpen && frame.sidebarWidth > 0));
+        assert.ok(frames.some((frame) => frame.titlebarSearch));
+      }
+      for (const frame of frames) {
+        assert.equal(frame.x, iconButtons[0]!.x);
+        if (platform === 'macos') {
+          assert.equal(frame.searchCount, 1);
+          assert.ok(frame.titleLeft >= frame.searchRight);
+        } else {
+          assert.ok(frame.searchCount <= 1);
+          if (frame.titlebarSearch) {
+            assert.equal(frame.sidebarWidth, 0);
+            assert.equal(frame.sidebarOpen, false);
+          }
+        }
+        const expected =
+          frame.title === 'Session A'
+            ? 'Question a'
+            : frame.title === 'Session B'
+              ? 'Question b'
+              : undefined;
+        assert.ok(frame.rows.length <= 1 && frame.rows.every((row) => row === expected));
+      }
+      await page.reload();
+      await expect(content('a')).toBeVisible();
+      await expect(back).toBeDisabled();
+      await expect(forward).toBeDisabled();
+      if (platform === 'windows') {
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        await toggle.click();
+        await expect(titlebarSearch).toBeVisible();
+        assert.equal(
+          await page.locator('#navigation').evaluate((sidebar) => sidebar.getAnimations().length),
+          0,
+        );
+        await toggle.click();
+        await expect(sidebarSearch).toBeVisible();
+      }
+      assert.deepEqual(errors, []);
+      cases.push({ platform, before, frames, errors });
+    } finally {
+      await page.close();
+    }
+  }
+  return cases;
+}
+
 function sampleDialogOpening(dialog: Locator) {
   return dialog.evaluate((element) => {
     const snapshot = () => {
@@ -423,8 +722,8 @@ async function verifyWindowsBackdropLayout(page: Page, url: string) {
   const verifyLayout = async (width: number) => {
     const modes = await measure();
     const mica = modes[0]!;
-    assert.deepEqual(mica.layout[0], [0, 0, width, 32]);
-    assert.deepEqual(mica.layout[1], [6, 38, width - 12, 806]);
+    assert.deepEqual(mica.layout[0], [0, 0, width, 40]);
+    assert.deepEqual(mica.layout[1], [6, 40, width - 12, 804]);
     for (const mode of modes) {
       assert.deepEqual(mode.layout, mica.layout, `${width}px ${mode.material}`);
       assert.equal(mode.outline, '1px');
@@ -743,6 +1042,12 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       );
       const projectMore = page.locator('.space-more').first();
       const projectNew = page.locator('.space-new-session').first();
+      const projectActionInset = () =>
+        projectNew.evaluate((button) => {
+          const row = button.closest('.space-heading')!.getBoundingClientRect();
+          return row.right - button.getBoundingClientRect().right;
+        });
+      assert.equal(await projectActionInset(), 4);
       const moreIcon = projectMore.locator('svg');
       const newIcon = projectNew.locator('svg');
       const colors = await rowActionColors(projectMore);
@@ -755,6 +1060,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await projectNew.hover();
       await expect(moreIcon).toHaveCSS('color', colors.muted);
       await expect(newIcon).toHaveCSS('color', colors.highlighted);
+      assert.equal(await projectActionInset(), 4);
       await page
         .locator('.space-heading')
         .first()
@@ -769,14 +1075,9 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await expect(projectMore).toBeFocused();
       await expect(moreIcon).toHaveCSS('color', colors.muted);
       await page.keyboard.press('Tab');
+      await expect(projectNew).toBeFocused();
+      assert.equal(await projectActionInset(), 4);
       await expect(newIcon).toHaveCSS('color', colors.muted);
-      assert.equal(
-        await page
-          .locator('.space-new-session')
-          .first()
-          .evaluate((node) => node === document.activeElement),
-        true,
-      );
       await shown('.workspace-group:first-child .space-new-session', 1);
       assert.ok((await read()).slice(4).every((item) => item.opacity === 0));
       await page.locator('.space-heading').first().hover();

@@ -4,6 +4,8 @@
 
 ## 会话搜索
 
+`SessionPage.windowNavigationHosts` 允许桌面宿主指定侧栏收展和搜索按钮的 DOM 容器，也可在侧栏完全展开时将搜索按钮放在共享侧栏的标题行。展开状态、搜索范围和焦点恢复由共享页面负责。Web 使用「项目」标题旁的入口。 [共享会话页面](src/desktop/SessionPage.tsx) · [桌面主窗口](../../apps/desktop/README.md#主窗口导航)
+
 [Sidebar](src/desktop/Sidebar.tsx)通过宿主提供的 `sessionSearch` 范围和可用性接入[SessionSearch](src/desktop/SessionSearch.tsx)，搜索材料来自完整会话／项目展示目录。数量不完整或来源失效与无匹配分别展示；同名项目使用可选登记位置辨识。搜索框为空时只显示最近 7 天更新的会话，关键词搜索覆盖完整目录。结果在同一列表中展示，滚动到底部附近或用方向键可继续浏览。行间距为 4px，悬停和选中复用侧栏导航底色，悬停底色即时切换。面板高度随可用视口确定。异步宿主等待新查询时可保留上一次查询的结果和滚动位置或空结果提示。空结果提示取决于已确认的查询。收到新查询结果后替换列表并回到顶部，等待期间暂停打开结果。搜索期间原侧栏目录隐藏但保留挂载，取消恢复折叠状态与焦点，打开沿原宿主回调。[DOM回归](test/isolated/desktop-session-search.test.tsx)覆盖旧会话、重名、键盘／输入法、排序刷新后选中项滚动、范围变化、空结果交接、失效及恢复。当前 Native 数据边界和验证限制见[Desktop owner](../../apps/desktop/README.md#侧栏会话搜索)。
 
 `SessionPage.workspaceTab` 让宿主的受管网页内容进入原 `SessionTabs`：共用一条标签栏、同一个8项有界model和原可拖动分栏，不新增详情壳或放大／还原按钮。明确请求按scope／requestId去重并选择已有workspace标签；含该标签时首次调宽62%，后续tab切换保留用户拖动宽度。workspace内容保持挂载，只接收当前可见性；收起／切tab不赋予UI取消任务的权限。标签变更即时保留最新model容量，处理同一commit的并发打开；普通browser释放、child与变更读取仍遵循原owner。
@@ -123,7 +125,7 @@ Desktop入口导出现有[Popover](src/desktop/components/ui/popover.tsx)的 Roo
 
 桌面 [共享样式](src/desktop/style.css)的项目添加按钮与行内编辑按钮使用透明背景和图标变色反馈；Composer 的聚焦边色／阴影遵循宿主根元素的 `data-input-modality`，pointer 状态不保留焦点装饰。未提供该状态的宿主沿原焦点规则。Dialog／Sheet 关闭按钮使用 `focus-visible` 提示；Native 的统一鼠标／键盘判定和窗口验证由 [Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)负责。
 
-[Sidebar](src/desktop/Sidebar.tsx) 的「项目」标题旁常驻搜索会话和添加项目入口，两个入口共用 `ghost`／`icon-sm` 公共按钮。目录选择等待及其他写入期间，添加按钮原位常显并沿用原禁用条件。行内新对话和更多由独立的 `.sidebar-actions` 容器负责显隐。父容器隐藏时，子按钮样式或选择器优先级变化均不会使其显现。悬停、行内聚焦、菜单打开及触屏仍按原条件显示。项目行和会话行的操作图标默认使用次级文字色，仅指针下的按钮使用前景色。键盘聚焦沿用焦点提示。禁用沿用公共按钮的透明度。父容器保留布局与键盘访问，禁用和业务串行门禁仍由原按钮及宿主执行。[默认浏览器回归](../../apps/desktop/test/isolated/sidebar-actions-browser.test.ts)构建生产 CSS 并通过原 Native 处理函数覆盖标题按钮常驻与样式一致、目录选择等待／取消、发送等待／未知回执恢复、逐帧显隐、DOM 身份、Tab、菜单和触屏；同时强制将按钮设为 `opacity:.65!important`，验证父层仍能保持隐藏。它进入默认测试和 Required unit；[测试准备](../../tests/README.md#侧栏显隐浏览器回归)说明浏览器依赖。
+[Sidebar](src/desktop/Sidebar.tsx) 的「项目」标题旁常驻搜索会话和添加项目入口，两个入口共用 `ghost`／`icon-sm` 公共按钮。目录选择等待及其他写入期间，添加按钮原位常显并沿用原禁用条件。行内新对话和更多由独立的 `.sidebar-actions` 容器负责显隐，项目行和会话行的操作区在行尾各留 4px。父容器隐藏时，子按钮样式或选择器优先级变化均不会使其显现。悬停、行内聚焦、菜单打开及触屏仍按原条件显示。项目行和会话行的操作图标默认使用次级文字色，仅指针下的按钮使用前景色。键盘聚焦沿用焦点提示。禁用沿用公共按钮的透明度。父容器保留布局与键盘访问，禁用和业务串行门禁仍由原按钮及宿主执行。[默认浏览器回归](../../apps/desktop/test/isolated/sidebar-actions-browser.test.ts)构建生产 CSS 并通过原 Native 处理函数覆盖标题按钮常驻与样式一致、目录选择等待／取消、发送等待／未知回执恢复、逐帧显隐、DOM 身份、Tab、菜单和触屏；同时强制将按钮设为 `opacity:.65!important`，验证父层仍能保持隐藏。它进入默认测试和 Required unit；[测试准备](../../tests/README.md#侧栏显隐浏览器回归)说明浏览器依赖。
 
 有更多操作的会话行让按钮与运行转圈共用右侧位置，转圈显示时不为按钮另外留出宽度。悬停或菜单打开时仅显示按钮，标题宽度和无障碍状态描述不变；待输入、未读与工作树标记仍可显示。默认浏览器回归覆盖深浅主题的图标位置、会话行悬停、移开、菜单打开与关闭。
 
@@ -173,7 +175,9 @@ Native 提供 `retainedPresentation` 时，输入区的模型或审核标签可�
 
 同一组件的 `.response-status` 与 `.message-meta` 沿[共享 CSS](src/desktop/style.css)共用28px信息行高度并垂直居中。独立流式消息直接在原 `.message-meta` 中显示提示，完成后替换为原时间与具备资格的复制控件；回复期间不叠加第二行时间或额外占位。准确轮次的提示继续位于处理过程折叠区外；上方为展开过程的最后一条Agent正文时，与完成后的工具栏同样距正文2px，轮次底部保留8px，避免原24px轮次留白造成完成时下一条消息上移16px。上方为展开工具时仍使用原混合间距，收起过程或尚无正文时保留原正文块间距。显示提示时过程区不叠加底部padding。底部跟随继续由阅读内容高度驱动，复制资格、过程内无信息栏与活动状态的来源规则保持。
 
-思考和准备阶段的提示使用 `--conversation-text-size`（默认14px）和 `--muted-foreground`，并沿用 [shadcn shimmer utility](https://ui.shadcn.com/docs/utils/shimmer) 的16px和1.5秒参数。思维链、工具和模型重连行将运行状态交给共享 `TraceLine`。思维链摘要的图标从第一条可见工具行取得，思考行使用同一灯泡图标。工具图标使用 `TraceIcon` 的统一尺寸。思维链中的图标和开合箭头按当前字体度量做视觉对齐，文字沿用原来的行高和间距。折叠箭头保持布局占位，只旋转内部 SVG，并遵循系统的减少动态效果设置。工具动作和描述共用一个 `TraceTitle`，由 shadcn 默认流光覆盖整段文字。启用减少动态效果时，标题显示为静态文字。
+思考和准备阶段的提示使用 `--conversation-text-size`（默认14px）和 `--muted-foreground`，并沿用 [shadcn shimmer utility](https://ui.shadcn.com/docs/utils/shimmer) 的16px和1.5秒参数。思维链、工具和模型重连行将运行状态交给共享 `TraceLine`。[ConversationTrace](src/desktop/ConversationTrace.tsx) 在活动摘要或单条活动思考的 `TraceIcon` 槽显示 14px「思考火花」图标。每 2.5 秒完成一轮，主星先转半圈并停住，右上和左下的星点依次亮起后再继续转动。当前段在已核实运行的工具交接期维持图标，标题沿用原动作。静态摘要取第一条可见工具的图标，纯思考使用灯泡。工具图标使用 `TraceIcon` 的统一尺寸。思维链中的图标和开合箭头按当前字体度量做视觉对齐，文字沿用原来的行高和间距。折叠箭头保持布局占位，只旋转内部 SVG，并遵循系统的减少动态效果设置。工具动作和描述共用一个 `TraceTitle`，由 shadcn 默认流光覆盖整段文字。启用减少动态效果时，进行中图标和标题静态显示。
+
+`17dcef51f` 加当前工作树在 Windows Chromium 158 运行[会话交互浏览器回归](../../apps/desktop/test/isolated/conversation-interactions-browser.test.ts)的工具过渡场景。深浅主题下逐帧检查工具回执交接、全部工具结算但轮次仍运行、轮次结束，以及 14px 图标槽与标题位置。浏览器还核对了半圈停止与小星点接力、结束时恢复原工具图标，以及减少动态效果下的静态星形。等待与执行权待核实由[思考轮次回归](test/desktop-reasoning-turns.test.tsx)覆盖。
 
 [Conversation](src/desktop/Conversation.tsx)在 Native Trace 的摘要位置显示「进行中」。`RunningTurnStatus` 按准确 `turn_timing` 的起点从 1 秒起显示，每秒递增。计时更新限于摘要组件，可见会话恢复后从原起点重新计算。思考活动和工具随实际记录进入可折叠过程，流式正文直接显示。执行权待核实、进入等待或停止及确认终态时切换到相应的状态。终态摘要以可靠起止时间显示耗时。没有可展开过程时使用静态摘要。普通非 Trace 展示在有明确思考记录且无活动工具时保留「正在思考…」提示，其余活动阶段由轮次摘要表达。
 

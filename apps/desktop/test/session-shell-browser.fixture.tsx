@@ -10,11 +10,40 @@ import {
 } from '@kite-ai/ui/desktop';
 import { createRoot } from 'react-dom/client';
 import { NativeDesktop } from '../src/native';
+import type {
+  NativeSessionSearchAction,
+  NativeSessionSearchPresentation,
+} from '../src/native-session-search-bridge';
 import { mcpSettingsBridgeFixture } from './mcp-settings-bridge.fixture';
 import { sessionSwitchBridge } from './session-switch-bridge.fixture';
 import '../src/native-tailwind.css';
 import '@kite-ai/ui/desktop/style.css';
 
+const platform = new URL(location.href).searchParams.get('page-navigation');
+const pageNavigation = platform === 'windows' || platform === 'macos';
+if (pageNavigation) {
+  document.documentElement.dataset.nativeWindow = 'true';
+  document.documentElement.dataset.platform = platform;
+  let search: NativeSessionSearchPresentation | undefined;
+  let onSearchAction: ((action: NativeSessionSearchAction) => void) | undefined;
+  window.kiteNativeSessionSearch = {
+    present(state) {
+      search = state;
+    },
+    close(requestId) {
+      if (search?.requestId === requestId) search = undefined;
+    },
+    watchActions(listener) {
+      onSearchAction = listener;
+      return () => {
+        onSearchAction = undefined;
+      };
+    },
+  };
+  window.dismissFixtureSearch = () => {
+    if (search) onSearchAction?.({ type: 'close', requestId: search.requestId });
+  };
+}
 export const control = sessionSwitchBridge({
   unselectedModel: new URL(location.href).searchParams.has('unselected-model'),
   withoutPermissions: new URL(location.href).searchParams.has('without-permissions'),
@@ -24,11 +53,12 @@ export const control = sessionSwitchBridge({
   holdDraft: new URL(location.href).searchParams.has('model-navigation'),
   protocol: 'chat-completions',
   modelNames: { b: 'Model B Extended Reasoning Route' },
-  replyParagraphs: new URL(location.href).searchParams.has('long')
-    ? 40
-    : new URL(location.href).searchParams.has('model-navigation')
-      ? 20
-      : 0,
+  replyParagraphs:
+    pageNavigation || new URL(location.href).searchParams.has('long')
+      ? 40
+      : new URL(location.href).searchParams.has('model-navigation')
+        ? 20
+        : 0,
   initialSelection: !new URL(location.href).searchParams.has('long'),
   worktreeNavigation: new URL(location.href).searchParams.has('worktree-navigation'),
   manageSessions: new URL(location.href).searchParams.has('manage-sessions'),
@@ -46,6 +76,7 @@ declare global {
   interface Window {
     sessionShellFixture: typeof control;
     remountSessionShellFixture: () => void;
+    dismissFixtureSearch?: () => void;
   }
 }
 Object.defineProperty(window, 'kiteNative', { value: control.bridge });
@@ -234,7 +265,7 @@ let root = createRoot(document.getElementById('root')!);
 window.remountSessionShellFixture = () => {
   root.unmount();
   root = createRoot(document.getElementById('root')!);
-  root.render(<NativeDesktop nativeWindow={settingsGeometry} />);
+  root.render(<NativeDesktop nativeWindow={settingsGeometry || pageNavigation} />);
 };
 root.render(
   formControls ? (
@@ -283,7 +314,7 @@ root.render(
     </section>
   ) : (
     <>
-      <NativeDesktop nativeWindow={settingsGeometry} />
+      <NativeDesktop nativeWindow={settingsGeometry || pageNavigation} />
       {new URL(location.href).searchParams.has('turn-notifications') && (
         <section
           aria-label="完成提醒测试夹具"

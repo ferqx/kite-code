@@ -13,13 +13,21 @@ export function NativeWindowFrame({
   showHeader = true,
   applicationEnabled = false,
   onAction,
+  navigation,
 }: {
   children: ReactNode;
   showHeader?: boolean;
   applicationEnabled?: boolean;
   onAction?: (action: NativeWindowMenuAction) => void;
+  navigation?: {
+    sidebarHost: (element: HTMLDivElement | null) => void;
+    searchHost: (element: HTMLDivElement | null) => void;
+    back?: () => void;
+    forward?: () => void;
+  };
 }) {
   const windows = document.documentElement.dataset.platform === 'windows';
+  const mac = document.documentElement.dataset.platform === 'macos';
   const bridge = window.kiteNative;
   const [active, setActive] = useState<NativeWindowMenuId>();
   const [focused, setFocused] = useState(0);
@@ -87,9 +95,9 @@ export function NativeWindowFrame({
   });
 
   return (
-    <div className="native-window-frame">
+    <div className="native-window-frame" data-window-navigation={navigation ? 'true' : undefined}>
       {showHeader ? (
-        <div className="native-window-titlebar" aria-hidden={windows ? undefined : true}>
+        <div className="native-window-titlebar">
           {windows ? (
             <div role="menubar" aria-label="应用菜单" className="native-window-menubar">
               {menus.map((menu, index) => (
@@ -150,11 +158,45 @@ export function NativeWindowFrame({
               ))}
             </div>
           ) : null}
-          {error ? (
+          {navigation && (
+            <nav className="native-window-navigation" aria-label="页面导航">
+              <div ref={navigation.sidebarHost} />
+              {(
+                [
+                  ['后退', navigation.back],
+                  ['前进', navigation.forward],
+                ] as const
+              ).map(([label, run], index) => (
+                <button
+                  key={label}
+                  type="button"
+                  aria-label={label}
+                  title={label}
+                  aria-disabled={!run}
+                  onClick={run}
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={index ? { transform: 'scaleX(-1)' } : undefined}
+                  >
+                    <path d={mac ? 'M16 10H4m0 0 6-6m-6 6 6 6' : 'm12 4-6 6 6 6'} />
+                  </svg>
+                </button>
+              ))}
+            </nav>
+          )}
+          {navigation && <div className="native-window-search" ref={navigation.searchHost} />}
+          {error && (
             <span role="alert" className="native-window-menu-error">
               {error}
             </span>
-          ) : null}
+          )}
         </div>
       ) : null}
       <div className="native-window-content">{children}</div>

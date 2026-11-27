@@ -910,6 +910,72 @@ try {
       });
       const trigger = page.locator('.conversation-trace > button').first();
       await trigger.waitFor();
+      const sparkles = trigger.locator('svg.conversation-trace-progress');
+      const parts = sparkles.locator(':scope > :is(path, g, circle)');
+      const partAnimations = () =>
+        parts.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).animationName));
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      assert.equal(await trigger.getAttribute('aria-description'), '进行中');
+      assert.deepEqual(await partAnimations(), [
+        'conversation-trace-star-turn',
+        'conversation-trace-spark-glow',
+        'conversation-trace-dot-glow',
+      ]);
+      assert.deepEqual(
+        await sparkles.evaluate((icon) => {
+          const { width, height } = icon.getBoundingClientRect();
+          return [width, height];
+        }),
+        [14, 14],
+      );
+      const [mainStar, upperStar, lowerStar] = await parts.evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const { x, y, width, height } = (node as SVGGraphicsElement).getBBox();
+          return { x: x + width / 2, y: y + height / 2, width };
+        }),
+      );
+      assert.ok(mainStar && upperStar && lowerStar);
+      assert.ok(upperStar.x > mainStar.x && upperStar.y < mainStar.y);
+      assert.ok(lowerStar.x < mainStar.x && lowerStar.y > mainStar.y);
+      assert.ok(upperStar.width >= lowerStar.width * 2);
+      const samples = await parts.evaluateAll(([star, spark, dot]) => {
+        const animations = [star!, spark!, dot!].flatMap((part) => part.getAnimations());
+        for (const animation of animations) animation.pause();
+        const frames = [0, 450, 900, 1000, 1350, 1650, 1950, 2250, 2500, 2950, 3850, 4450].map(
+          (time) => {
+            for (const animation of animations) animation.currentTime = time;
+            return [
+              getComputedStyle(star!).rotate,
+              getComputedStyle(spark!).opacity,
+              getComputedStyle(dot!).opacity,
+            ];
+          },
+        );
+        for (const animation of animations) animation.play();
+        return frames;
+      });
+      assert.deepEqual(samples, [
+        ['0deg', '0.62', '0.62'],
+        ['90deg', '0.62', '0.62'],
+        ['180deg', '0.62', '0.62'],
+        ['180deg', '0.62', '0.62'],
+        ['180deg', '1', '0.62'],
+        ['180deg', '0.62', '0.62'],
+        ['180deg', '0.62', '1'],
+        ['180deg', '0.62', '0.62'],
+        ['180deg', '0.62', '0.62'],
+        ['270deg', '0.62', '0.62'],
+        ['360deg', '1', '0.62'],
+        ['360deg', '0.62', '1'],
+      ]);
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      assert.equal(await trigger.getAttribute('aria-description'), '进行中');
+      assert.deepEqual(await partAnimations(), ['none', 'none', 'none']);
+      assert.deepEqual(
+        await parts.evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).opacity)),
+        ['1', '1', '1'],
+      );
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
       // Observe individual rows, not just the outer trace node and its final rectangle.
       const probe = await page.evaluateHandle(() => {
         const frames: ReturnType<typeof snapshot>[] = [];
@@ -924,10 +990,23 @@ try {
           const trace = document.querySelector('.conversation-trace');
           const viewport = document.querySelector('.conversation-viewport');
           const panel = trace?.querySelector(':scope > .collapsible-motion-content');
+          const summary = trace?.querySelector(':scope > button');
+          const marker = summary?.querySelector('[data-slot="trace-icon"]:first-child');
+          const title = summary?.querySelector('[data-slot="trace-title"]');
           return {
             phase: window.liveAggregationPhase,
             top: viewport?.scrollTop,
             height: panel?.getBoundingClientRect().height,
+            progress: summary?.getAttribute('aria-description') === '进行中',
+            markerShape: marker?.querySelector('svg')?.innerHTML,
+            markerSize: [
+              marker?.getBoundingClientRect().width,
+              marker?.getBoundingClientRect().height,
+            ],
+            titleIndent:
+              title &&
+              summary &&
+              title.getBoundingClientRect().x - summary.getBoundingClientRect().x,
             rows: [...(trace?.querySelectorAll('.tool-activity') ?? [])].map((row) => {
               const header = row.querySelector(':scope > [data-trace-line]');
               const icon = header?.querySelector('[data-slot="trace-icon"] svg');
@@ -999,11 +1078,19 @@ try {
       await stage('motion-read-failure', () =>
         window.liveAggregationFixture.releaseNativeShellMetadata(),
       );
-      await stage('motion-finished', () => {
+      await stage('motion-tools-settled', () => {
         for (const index of [2, 4, 7, 8, 9, 11, 14])
           window.liveAggregationFixture.settle(index, 'succeeded', true);
+      });
+      await stage('motion-finished', () => {
+        const star = document.querySelector('.conversation-trace-star');
+        const animation = star?.getAnimations()[0];
+        if (!animation) throw new Error('missing running star before settlement');
+        animation.currentTime = 450;
         window.liveAggregationFixture.finish();
       });
+      assert.equal(await trigger.getAttribute('aria-description'), null);
+      assert.equal(await sparkles.count(), 0);
       const measured = await probe.evaluate((state) => {
         state.running = false;
         return state.frames;
@@ -1013,6 +1100,22 @@ try {
       report.cases.push({ theme, width, errors, screenshotFrames, samples: [] });
       assert.deepEqual(errors, []);
       const before = measured.filter((frame) => frame.phase === 'motion-before-receipt').at(-1)!;
+      const toolsSettled = measured
+        .filter((frame) => frame.phase === 'motion-tools-settled')
+        .at(-1)!;
+      const finished = measured.filter((frame) => frame.phase === 'motion-finished').at(-1)!;
+      assert.equal(toolsSettled.progress, true);
+      assert.equal(finished.progress, false);
+      assert.ok(before.rows[0]?.shape);
+      for (const frame of measured.filter(
+        (frame) => frame.phase === 'motion-finished' && !frame.progress,
+      )) {
+        assert.equal(frame.markerShape, before.rows[0]?.shape);
+      }
+      for (const frame of [before, toolsSettled, finished]) {
+        assert.deepEqual(frame.markerSize, [14, 14]);
+        assert.equal(frame.titleIndent, before.titleIndent);
+      }
       const receiptFrames = measured.filter((frame) =>
         ['motion-receipt-held', 'motion-receipt-continued'].includes(frame.phase),
       );
@@ -1030,6 +1133,7 @@ try {
           iconOpacity,
         }));
       for (const frame of receiptFrames) {
+        assert.equal(frame.progress, true);
         assert.deepEqual(
           rows(frame),
           rows(before),

@@ -230,6 +230,7 @@ test('a failed singleton trace names the trusted failure while preserving its or
           id="trace"
           label="工具执行"
           running={false}
+          showProgress={false}
           summarizeTools
           processOpen
           expanded={{ trace: open }}

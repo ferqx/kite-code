@@ -35,12 +35,14 @@ function fixture(
   options?: Parameters<typeof sessionSwitchBridge>[0],
   diagnostics = false,
   url = 'http://localhost',
+  nativeWindow = false,
 ) {
   const dom = new JSDOM('<div id="root"></div>', {
     url,
     pretendToBeVisual: true,
   });
   Object.defineProperty(dom.window.navigator, 'language', { value: 'zh-CN' });
+  if (nativeWindow) dom.window.document.documentElement.dataset.platform = 'windows';
   const restore = prepareDesktopDom(dom);
   const prior = {
     window: globalThis.window,
@@ -149,7 +151,9 @@ function fixture(
     click,
     ready,
     async render() {
-      await act(async () => root.render(<NativeDesktop testDiagnostics={diagnostics} />));
+      await act(async () =>
+        root.render(<NativeDesktop testDiagnostics={diagnostics} nativeWindow={nativeWindow} />),
+      );
       await click('a');
       await ready('a');
     },
@@ -1319,6 +1323,93 @@ test('session search opens the exact running session without sending or cancelli
     expect(f.query('.composer [role="textbox"]')).toBe(composer);
     expect(promptValue(composer)).toBe('Unsent search draft B');
     expect(f.dom.window.document.activeElement).toBe(f.query('[aria-label="搜索会话"]'));
+  } finally {
+    await f.close();
+  }
+});
+
+test('window page history includes search results and skips a superseded conversation read', async () => {
+  const f = fixture({ active: true }, false, undefined, true);
+  const titlebar = (label: string) =>
+    f.query<HTMLButtonElement>(`.native-window-titlebar button[aria-label="${label}"]`);
+  const press = async (label: string) => act(async () => titlebar(label).click());
+  const page = (label: string) =>
+    f.until(() => f.query('.breadcrumb strong').textContent === label);
+  const draft = () => promptValue(f.query('.composer [role="textbox"]'));
+  try {
+    await f.render();
+    expect(titlebar('后退').getAttribute('aria-disabled')).toBe('true');
+    expect(titlebar('前进').getAttribute('aria-disabled')).toBe('true');
+    const before = f.requests.length;
+    await f.edit('Unsent history draft A');
+    await f.search('Session B');
+    await f.closeSearch();
+    expect(f.dom.window.document.activeElement).toBe(
+      f.query('.sidebar-header button[aria-label="搜索会话"]'),
+    );
+    expect(titlebar('后退').getAttribute('aria-disabled')).toBe('true');
+    expect(draft()).toBe('Unsent history draft A');
+    await f.search('Session B');
+    await f.pickSearch();
+    await f.ready('b');
+    await f.edit('Unsent history draft B');
+    await act(async () => f.query<HTMLButtonElement>('.scheduled-tasks-navigation').click());
+    await page('定时任务');
+
+    f.hold();
+    await press('后退');
+    await f.until(() => f.pending('selection') === 1);
+    await page('Session B');
+    expect(draft()).toBe('Unsent history draft B');
+    expect(f.host.textContent).not.toContain('Reply a');
+    await press('后退');
+    await page('Session A');
+    expect(draft()).toBe('Unsent history draft A');
+    expect(f.host.textContent).not.toContain('Reply b');
+    await f.resume();
+    await f.ready('a');
+    expect(draft()).toBe('Unsent history draft A');
+    expect(titlebar('后退').getAttribute('aria-disabled')).toBe('true');
+
+    await press('前进');
+    await f.ready('b');
+    expect(draft()).toBe('Unsent history draft B');
+    await act(async () => f.withdraw());
+    await f.until(() => titlebar('前进').getAttribute('aria-disabled') === 'true');
+    expect(titlebar('后退').getAttribute('aria-disabled')).toBe('true');
+    const selections = f.requests.filter((request) => request.method === 'select').length;
+    await press('后退');
+    expect(f.requests.filter((request) => request.method === 'select')).toHaveLength(selections);
+    await act(async () => f.restoreConnection());
+    await f.ready('b');
+    expect(titlebar('前进').getAttribute('aria-disabled')).toBe('false');
+    expect(draft()).toBe('Unsent history draft B');
+    await press('前进');
+    await page('定时任务');
+    expect(titlebar('前进').getAttribute('aria-disabled')).toBe('true');
+    await press('后退');
+    await f.ready('b');
+    await act(async () => f.query<HTMLButtonElement>('.new-session').click());
+    await page('新对话');
+    expect(titlebar('前进').getAttribute('aria-disabled')).toBe('true');
+    await press('后退');
+    await f.ready('b');
+    await press('前进');
+    await page('新对话');
+    expect(titlebar('前进').getAttribute('aria-disabled')).toBe('true');
+    const navigationRequests = f.requests.slice(before);
+    const draftWrites = navigationRequests.filter((request) => request.method === 'draft.write');
+    expect(draftWrites.length).toBeGreaterThan(0);
+    expect(
+      draftWrites.every(
+        ({ sessionId, content }) => content === `Unsent history draft ${sessionId.toUpperCase()}`,
+      ),
+    ).toBe(true);
+    expect(
+      navigationRequests.filter(
+        (request) => request.method !== 'draft.write' && businessMethods.has(request.method),
+      ),
+    ).toEqual([]);
   } finally {
     await f.close();
   }

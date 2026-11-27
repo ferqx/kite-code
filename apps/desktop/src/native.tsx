@@ -140,6 +140,7 @@ import {
 } from './native-model-picker';
 import { submitOfficeRequest } from './native-office-request-submit';
 import { useNativeOutputFiles } from './native-output-files';
+import { useNativePageHistory } from './native-page-history';
 import { NativePlanHistory, useNativePlanProgress } from './native-plan-progress';
 import type { NativePlanProgress } from './native-plan-progress-bridge';
 import {
@@ -382,6 +383,8 @@ function NativeDesktopContent({
   const startupDirectoryUnavailable = useRef(false);
   const theme = useNativeTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarHost, setSidebarHost] = useState<HTMLDivElement | null>(null);
+  const [searchHost, setSearchHost] = useState<HTMLDivElement | null>(null);
   const settingsPort = nativeWindow ? window.kiteNativeSettings : undefined;
   const [toolsOpen, setToolsOpen] = useState(false);
   const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
@@ -2023,6 +2026,17 @@ function NativeDesktopContent({
     pendingSession && directory
       ? { storeId: directory.storeId, sessionId: pendingSession.id }
       : undefined;
+  const pageHistory = useNativePageHistory(
+    nativeWindow && startup === 'ready' ? searchStore : undefined,
+    scheduledTasksView ? 'scheduled' : preparing ? 'new' : 'conversation',
+    scheduledTasksView
+      ? undefined
+      : preparing
+        ? newWorkspace
+        : (frame.pendingSessionId ??
+          (selection?.storeId === searchStore ? selection?.session.id : undefined)),
+    pageIntent.current,
+  );
   const verifiedBrowserRestore = useRef('');
   const freshBrowserRestore = useRef('');
   const browserRestoreCandidate =
@@ -3305,6 +3319,53 @@ function NativeDesktopContent({
       contextIntent.current++;
       setContextBusy(false);
     }
+  }
+  function openScheduledTasks() {
+    pageIntent.current++;
+    setPreparedModels(undefined);
+    setToolsOpen(false);
+    setAgentBrowserOpen(false);
+    setScheduledTasksView(true);
+  }
+  function openConversation(sessionId: string) {
+    const sameTarget =
+      selected.current === sessionId &&
+      (!!selectionRead.current ||
+        (selection?.storeId === directory?.storeId && selection?.session.id === sessionId));
+    if (sameTarget && readingParent && !scheduledTasksView && !preparing) return;
+    pageIntent.current++;
+    setScheduledTasksView(false);
+    setPreparing(false);
+    if (!sameTarget || frame.preparation || scheduledTasksView)
+      void report(() => select(sessionId));
+  }
+  function pageHistoryAction(direction: -1 | 1) {
+    if (
+      !searchAvailable ||
+      !directory ||
+      state?.callerUnavailable ||
+      state?.backgroundUnavailable ||
+      settingsOpen ||
+      readLifecycle.current.quitting
+    )
+      return;
+    const destination = pageHistory.destination(direction, (route) => {
+      if (route.kind === 'conversation')
+        return directory.sessions.some(
+          (row) => row.id === route.id && !row.deletedAt && !row.parentSessionId,
+        );
+      if (route.kind === 'new')
+        return !route.id || directory.workspaces.some((workspace) => workspace.id === route.id);
+      return true;
+    });
+    if (!destination) return;
+    return () => {
+      const { index, route } = destination;
+      pageHistory.move(index);
+      if (route.kind === 'conversation') openConversation(route.id);
+      else if (route.kind === 'new') prepareConversation(route.id || undefined);
+      else openScheduledTasks();
+    };
   }
   async function acceptWorkspaceRemoval(value: NativeResult) {
     if (
@@ -7062,6 +7123,12 @@ function NativeDesktopContent({
     nativeWindow ? (
       <NativeWindowFrame
         showHeader={startup === 'ready'}
+        navigation={{
+          sidebarHost: setSidebarHost,
+          searchHost: setSearchHost,
+          back: pageHistoryAction(-1),
+          forward: pageHistoryAction(1),
+        }}
         applicationEnabled={
           startup === 'ready' &&
           !pending &&
@@ -7186,6 +7253,15 @@ function NativeDesktopContent({
       }}
       workspaces={workspaceModels}
       sessionSearch={sessionSearch}
+      windowNavigationHosts={
+        nativeWindow
+          ? {
+              sidebar: sidebarHost,
+              search: searchHost,
+              searchInSidebarHeader: document.documentElement.dataset.platform === 'windows',
+            }
+          : undefined
+      }
       sidebarSelected={firstDirectorySession?.id}
       selected={
         !scheduledTasksView &&
@@ -7678,30 +7754,13 @@ function NativeDesktopContent({
         lookupWorkspaceRemoval: (commandId) =>
           void report(() => lookupWorkspaceRemoval(commandId), true, '查询移除结果'),
         settings: () => setSettingsOpen(true),
-        scheduledTasks: () => {
-          pageIntent.current++;
-          setPreparedModels(undefined);
-          setToolsOpen(false);
-          setAgentBrowserOpen(false);
-          setScheduledTasksView(true);
-        },
+        scheduledTasks: openScheduledTasks,
         theme,
         connection: diagnostics
           ? { label: '重新读取目录', run: () => void report(readDirectory) }
           : undefined,
       }}
-      onOpen={(sessionId) => {
-        const sameTarget =
-          selected.current === sessionId &&
-          (!!selectionRead.current ||
-            (selection?.storeId === directory?.storeId && selection?.session.id === sessionId));
-        if (sameTarget && readingParent && !scheduledTasksView && !preparing) return;
-        pageIntent.current++;
-        setScheduledTasksView(false);
-        setPreparing(false);
-        if (!sameTarget || frame.preparation || scheduledTasksView)
-          void report(() => select(sessionId));
-      }}
+      onOpen={openConversation}
       newConversation={
         preparing && !scheduledTasksView
           ? {
@@ -7890,6 +7949,8 @@ function NativeDesktopContent({
               onImageFiles: () => {},
               active: cachedComposer.active,
               sendLabel: cachedComposer.sendLabel,
+              // Revalidating a cached page must not look like a queue edit to the composer.
+              queueFocusKey,
               queue: cachedComposer.queueItems
                 ? {
                     items: cachedComposer.queueItems,

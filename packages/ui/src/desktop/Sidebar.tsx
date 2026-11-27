@@ -24,6 +24,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Badge } from './components/ui/badge';
 import {
   DropdownMenu,
@@ -69,6 +70,7 @@ export function sessionTime(value?: string) {
 }
 
 export interface DirectoryProps {
+  searchTriggerHost?: HTMLElement | null;
   sessionSearch?: {
     scope: string;
     available: boolean;
@@ -541,6 +543,22 @@ export function Sidebar({
     onClose: closeSearch,
     restoreFocus: restoreSearchFocus,
   };
+  const searchButton = props.sessionSearch && (
+    <Button
+      ref={searchTrigger}
+      className="session-search-trigger"
+      variant="ghost"
+      size="icon-sm"
+      aria-label="搜索会话"
+      title="搜索会话"
+      aria-expanded={searchOpen}
+      aria-haspopup="dialog"
+      aria-controls={searchOpen && !props.sessionSearch.render ? searchId : undefined}
+      onClick={() => (searchOpen ? closeSearch() : setSearchScope(props.sessionSearch?.scope))}
+    >
+      <HugeiconsIcon icon={Search01Icon} aria-hidden="true" />
+    </Button>
+  );
   const newConversationSelected = activePage === 'newConversation' && !props.selectedWorkspace;
   const selectedSessionWorkspace = useMemo(
     () =>
@@ -553,6 +571,9 @@ export function Sidebar({
   );
   return (
     <>
+      {searchButton &&
+        props.searchTriggerHost &&
+        createPortal(searchButton, props.searchTriggerHost)}
       {(actions.newSession || actions.workbench || actions.scheduledTasks) && (
         <SidebarNavigationList className="primary-navigation" aria-label="主要导航">
           {actions.newSession && (
@@ -590,24 +611,7 @@ export function Sidebar({
         </SidebarNavigationList>
       )}
       <SidebarNavigationHeading className="nav-label" label="项目">
-        {props.sessionSearch && (
-          <Button
-            ref={searchTrigger}
-            className="session-search-trigger"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="搜索会话"
-            title="搜索会话"
-            aria-expanded={searchOpen}
-            aria-haspopup="dialog"
-            aria-controls={searchOpen && !props.sessionSearch.render ? searchId : undefined}
-            onClick={() =>
-              searchOpen ? closeSearch() : setSearchScope(props.sessionSearch?.scope)
-            }
-          >
-            <HugeiconsIcon icon={Search01Icon} />
-          </Button>
-        )}
+        {props.searchTriggerHost === undefined && searchButton}
         {actions.lookupSessionMutation && !!actions.sessionMutationResults?.length && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

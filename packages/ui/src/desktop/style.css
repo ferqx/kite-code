@@ -4061,6 +4061,71 @@ body {
 .kite-client .conversation-trace-line {
   min-height: 32px;
 }
+.kite-client .conversation-trace-progress {
+  color: var(--foreground);
+  overflow: visible;
+}
+.kite-client .conversation-trace-progress > :is(path, g, circle) {
+  transform-box: fill-box;
+  transform-origin: center;
+  rotate: 0deg;
+  scale: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .kite-client .conversation-trace-progress {
+    --trace-sparkle-cycle: 2.5s;
+  }
+  .kite-client .conversation-trace-star {
+    animation: conversation-trace-star-turn calc(var(--trace-sparkle-cycle) * 2) ease-in-out
+      infinite;
+  }
+  .kite-client .conversation-trace-spark {
+    animation: conversation-trace-spark-glow var(--trace-sparkle-cycle) ease-in-out infinite;
+  }
+  .kite-client .conversation-trace-dot {
+    animation: conversation-trace-dot-glow var(--trace-sparkle-cycle) ease-in-out infinite;
+  }
+}
+/* Two half-turns advance in the same direction, leaving a rest after each. */
+@keyframes conversation-trace-star-turn {
+  from {
+    rotate: 0deg;
+  }
+  18%,
+  50% {
+    rotate: 0.5turn;
+  }
+  68%,
+  to {
+    rotate: 1turn;
+  }
+}
+@keyframes conversation-trace-spark-glow {
+  0%,
+  42%,
+  66%,
+  100% {
+    opacity: 0.62;
+    scale: 1;
+  }
+  54% {
+    opacity: 1;
+    scale: 1.3;
+  }
+}
+@keyframes conversation-trace-dot-glow {
+  0%,
+  66%,
+  90%,
+  100% {
+    opacity: 0.62;
+    scale: 1;
+  }
+  78% {
+    opacity: 1;
+    scale: 1.5;
+  }
+}
 .kite-client .conversation-trace-line,
 .kite-client .conversation-turn-notice {
   font-size: var(--conversation-text-size);
