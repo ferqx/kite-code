@@ -3239,19 +3239,10 @@ test('a held cached Session switch restores the target draft and controls togeth
 test('settings overlay the still-painted page without remounting its draft or re-reading the selected conversation', async () => {
   const f = fixture();
   async function openSettings() {
-    await act(async () => {
-      const trigger = f.host.querySelector<HTMLButtonElement>('button[aria-label="用户菜单"]')!;
+    await act(() => {
+      const trigger = f.host.querySelector<HTMLButtonElement>('button[aria-label="打开设置"]')!;
       trigger.focus();
-      trigger.dispatchEvent(
-        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-      );
-    });
-    await act(async () => {
-      const item = [...f.host.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-        (element) => element.textContent === '设置',
-      )!;
-      expect(item).toBeDefined();
-      item.click();
+      trigger.click();
     });
   }
   const conversationReads = () =>
@@ -3262,6 +3253,16 @@ test('settings overlay the still-painted page without remounting its draft or re
     await f.edit('unsent settings draft 雪🙂', '当前会话私有草稿');
     const input = f.input('当前会话私有草稿')!;
     const page = f.host.querySelector<HTMLElement>('.client-panels')!;
+    const settingsButton = page.querySelector<HTMLButtonElement>('button[aria-label="打开设置"]')!;
+    expect(settingsButton.textContent).toBe('设置');
+    const settingsFooter = page.querySelector('.sidebar-settings-footer')!;
+    expect(settingsFooter.contains(settingsButton)).toBe(true);
+    expect(settingsFooter.previousElementSibling?.classList.contains('workspace-directory')).toBe(
+      true,
+    );
+    expect(page.querySelector('.sidebar')?.lastElementChild).toBe(settingsFooter);
+    expect(page.querySelector('.sidebar-utilities')).toBeNull();
+    expect(settingsButton.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
     const reads = [...conversationReads()];
     await openSettings();
     const dialog = f.host.querySelector<HTMLElement>('.desktop-settings-dialog[role="dialog"]');
@@ -3359,6 +3360,7 @@ test('settings overlay the still-painted page without remounting its draft or re
     await act(async () => closeSettings.click());
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(f.host.querySelector('.desktop-settings-dialog')).toBeNull();
+    expect(f.host.activeElement).toBe(settingsButton);
     expect(f.host.querySelector('.client-panels')).toBe(page);
     expect(page.style.opacity).toBe('');
     expect(page.style.pointerEvents).toBe('');
@@ -3389,6 +3391,7 @@ test('settings overlay the still-painted page without remounting its draft or re
     });
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(f.host.querySelector('.desktop-settings-dialog')).toBeNull();
+    expect(f.host.activeElement).toBe(settingsButton);
     expect(f.input('当前会话私有草稿')).toBe(input);
     expect(promptValue(input)).toBe('unsent settings draft 雪🙂');
     expect(conversationReads()).toEqual(reads);
@@ -3417,18 +3420,7 @@ test('provider configuration replaces the list and asks before discarding a chan
     await f.click('Original A');
     await f.edit('provider settings draft', '当前会话私有草稿');
     const input = f.input('当前会话私有草稿');
-    await act(async () => {
-      const trigger = f.host.querySelector<HTMLButtonElement>('button[aria-label="用户菜单"]')!;
-      trigger.focus();
-      trigger.dispatchEvent(
-        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-      );
-    });
-    await act(async () =>
-      [...f.host.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-        .find((item) => item.textContent === '设置')!
-        .click(),
-    );
+    await f.click('打开设置');
     await f.click('提供商与模型');
     await f.click('新增提供商');
     const shell = f.host.querySelector('.desktop-settings')!;
@@ -4009,14 +4001,7 @@ test('project and branch metadata failures stay silent without qualifying a firs
     await f.click('Ordinary directory');
     expect(f.dom.window.document.querySelector('.native-toast') === null).toBe(true);
     expect(promptValue(f.input())).toBe('unsent draft');
-    await act(async () => {
-      const profile = f.host.querySelector<HTMLButtonElement>('[aria-label="用户菜单"]')!;
-      profile.focus();
-      profile.dispatchEvent(
-        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-      );
-    });
-    await f.click('设置');
+    await f.click('打开设置');
     expect(f.dom.window.document.querySelector('.settings-content .notice.error') === null).toBe(
       true,
     );
@@ -5575,18 +5560,7 @@ test('MCP and Skills share the settings content column, Escape closes details fi
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
   };
   const openSettings = async () => {
-    await act(async () => {
-      const trigger = f.host.querySelector<HTMLButtonElement>('button[aria-label="用户菜单"]')!;
-      trigger.focus();
-      trigger.dispatchEvent(
-        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-      );
-    });
-    await act(async () =>
-      [...f.host.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-        .find((item) => item.textContent === '设置')!
-        .click(),
-    );
+    await f.click('打开设置');
   };
   const conversationReads = () =>
     f.calls.filter((input) =>

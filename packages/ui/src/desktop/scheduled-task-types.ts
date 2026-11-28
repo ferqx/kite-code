@@ -54,6 +54,7 @@ export function scheduledTaskError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   const labels: Record<string, string> = {
     scheduled_task_not_started: '本次未新建运行，请查看运行记录。',
+    scheduled_run_session_unavailable: '暂时无法打开这次运行的会话，请重试。',
     scheduled_tasks_scope_changed: '连接或配置已变化，请重试保存。',
     scheduled_reasoning_effort_unavailable: '思考程度不可用，请重新选择。',
     cancel_requested: '已按请求停止。',

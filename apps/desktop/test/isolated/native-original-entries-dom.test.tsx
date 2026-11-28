@@ -13,7 +13,7 @@ const bootstrap = new JSDOM('<!doctype html><div></div>');
 const initialGlobals = { window: globalThis.window, document: globalThis.document };
 Object.assign(globalThis, { window: bootstrap.window, document: bootstrap.window.document });
 const { createRoot } = await import('react-dom/client');
-const { MessageContent } = await import('@kite-ai/ui/desktop');
+const { ErrorFeedbackContext, MessageContent } = await import('@kite-ai/ui/desktop');
 const { NativeGeneralSettings } = await import('../../src/native-general-settings');
 const { NativeModelOutputMessage } = await import('../../src/native-model-output-message');
 Object.assign(globalThis, initialGlobals);
@@ -52,7 +52,9 @@ function fixture() {
 }
 test('General keeps the Windows Shell choice through failed preparation and updates it on confirmed retry', async () => {
   const f = fixture(),
-    requests: NativeRequest[] = [];
+    requests: NativeRequest[] = [],
+    errors: string[] = [];
+  const reportError = (message: string) => errors.push(message);
   let settings: NativeShellSettingsFacts = {
     kind: 'settings.general.shell',
     storeId: 'store',
@@ -86,14 +88,16 @@ test('General keeps the Windows Shell choice through failed preparation and upda
   const render = (windowsShell: boolean) =>
     act(async () =>
       f.root.render(
-        <NativeGeneralSettings
-          bridge={bridge}
-          generation={1}
-          storeId="store"
-          editor="vscode"
-          onEditorChange={() => {}}
-          windowsShell={windowsShell}
-        />,
+        <ErrorFeedbackContext.Provider value={reportError}>
+          <NativeGeneralSettings
+            bridge={bridge}
+            generation={1}
+            storeId="store"
+            editor="vscode"
+            onEditorChange={() => {}}
+            windowsShell={windowsShell}
+          />
+        </ErrorFeedbackContext.Provider>,
       ),
     );
   try {
@@ -101,7 +105,8 @@ test('General keeps the Windows Shell choice through failed preparation and upda
     expect(f.host.textContent).not.toContain('集成终端 Shell');
     expect(requests.some(({ method }) => method.startsWith('settings.general.shell.'))).toBe(false);
     await render(true);
-    expect(f.host.querySelector('[role="alert"]')?.textContent).toBe('暂时无法读取集成终端设置。');
+    expect(f.host.querySelector('[role="alert"]')).toBeNull();
+    expect(errors).toEqual(['暂时无法读取集成终端设置，请重新读取。']);
     const retry = [...f.host.querySelectorAll('button')].find(
       (button) => button.textContent === '重新读取',
     )!;
@@ -127,7 +132,8 @@ test('General keeps the Windows Shell choice through failed preparation and upda
         ),
       );
       expect(select.textContent).toBe('Git Shell');
-      expect(f.host.querySelector('[role="status"]')?.textContent).toBe('正在保存…');
+      expect(select.closest('.settings-row')?.getAttribute('aria-busy')).toBe('true');
+      expect(f.host.querySelector('[role="status"]')).toBeNull();
     }
     const read: NativeRequest = { method: 'settings.general.shell.read', generation: 1 };
     const save: NativeRequest = {
@@ -141,7 +147,8 @@ test('General keeps the Windows Shell choice through failed preparation and upda
     await act(async () => saving.reject(Error('windows_shell_asset_changed')));
     expect(select.textContent).toBe('Git Shell');
     expect(f.host.querySelector('[role="status"]')?.textContent).toBeUndefined();
-    expect(f.host.querySelector('[role="alert"]')?.textContent).toBe('未确认这次选择，请重试。');
+    expect(f.host.querySelector('[role="alert"]')).toBeNull();
+    expect(errors).toEqual(['暂时无法读取集成终端设置，请重新读取。', '未确认这次选择，请重试。']);
     expect(shellRequests()).toEqual([read, read, save, read]);
 
     saving = Promise.withResolvers<void>();

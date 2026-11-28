@@ -47,6 +47,7 @@ export function NativeSettingsWorkspace({
   const [discard, setDiscard] = useState<(() => void) | null>(null);
   const editorControl = useRef<NativeSettingsEditorControl | null>(null);
   const discardCancel = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
   const { generation, storeId, selection } = state;
   const feedback = useNativeErrorFeedback(
     JSON.stringify([state.instanceId, generation, storeId, page]),
@@ -105,7 +106,21 @@ export function NativeSettingsWorkspace({
           ref={setToastHost}
           showOverlay={false}
           showCloseButton={false}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          onOpenAutoFocus={() => {
+            const active = document.activeElement;
+            returnFocus.current = active instanceof HTMLElement ? active : null;
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const target = returnFocus.current;
+            if (
+              document.activeElement === document.body &&
+              target?.isConnected &&
+              target !== document.body &&
+              !target.closest('[inert]')
+            )
+              target.focus({ preventScroll: true });
+          }}
           onEscapeKeyDown={(event) => {
             if (discard) {
               event.preventDefault();
@@ -139,8 +154,8 @@ export function NativeSettingsWorkspace({
               />
             ) : page === 'appearance' ? (
               <section className="general-settings" aria-label="外观设置">
-                <NativeSettingsHeading title="外观" description="选择 Kite 的显示主题。" />
-                <div className="settings-card">
+                <NativeSettingsHeading title="外观" />
+                <div>
                   <label className="settings-row" htmlFor={appearanceId}>
                     <span>
                       <strong>外观</strong>
@@ -170,10 +185,7 @@ export function NativeSettingsWorkspace({
                 />
               ) : (
                 <section className="general-settings" aria-label="网页搜索设置">
-                  <NativeSettingsHeading
-                    title="网页搜索"
-                    description="跟随模型与提供商，无需单独配置。"
-                  />
+                  <NativeSettingsHeading title="网页搜索" />
                   <p role="status">当前连接不支持网页搜索设置。</p>
                 </section>
               )

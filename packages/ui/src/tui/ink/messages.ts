@@ -76,7 +76,6 @@ export const enUS = {
   'language.saveFailed': 'Language changed for this session, but could not be saved.',
   'permission.saveFailed':
     'Permission mode changed for this session, but could not be saved for the next launch.',
-  'trust.saving': 'Saving workspace trust…',
   'trust.openWorkspace': 'Open this workspace?',
   'trust.providesConfiguration':
     'This workspace may provide local configuration, skills, and MCP servers.',
@@ -357,7 +356,6 @@ export const zhCN: { [K in MessageKey]: string } = {
   'language.enUSDescription': '始终使用英文。',
   'language.saveFailed': '本次已切换语言，但无法保存为下次启动的设置。',
   'permission.saveFailed': '本次已切换权限模式，但无法保存为下次启动的默认设置。',
-  'trust.saving': '正在保存工作区信任设置…',
   'trust.openWorkspace': '是否打开此工作区？',
   'trust.providesConfiguration': '此工作区可能提供本地配置、技能和 MCP 服务器。',
   'trust.approvalSettings': 'Kite Code 可能会根据当前审批设置运行命令并修改文件。',

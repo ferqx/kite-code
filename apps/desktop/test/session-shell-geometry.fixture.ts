@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import type { Browser } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import type {} from './session-shell-browser.fixture';
 
 /** Hidden preparation must paint no leaf controls, including inherited visibility transitions. */
@@ -1178,8 +1178,7 @@ export async function verifySwitchGeometry(browser: Browser, url: string, artifa
         await page.screenshot({ path: path.join(artifact, `switch-${theme}-${motion}.png`) });
 
         await page.goto(`${url}?settings-geometry=1`);
-        await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-        await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+        await page.getByRole('button', { name: '打开设置', exact: true }).click();
         await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
         await page.getByRole('button', { name: '管理 Demo Service 的模型', exact: true }).click();
         await page.waitForTimeout(220);
@@ -1706,6 +1705,45 @@ export async function verifyColdSessionToolbarWidth(
   return cases;
 }
 
+export async function verifySettingsSelectPlacement(page: Page) {
+  const dialog = page.getByRole('dialog', { name: '设置', exact: true });
+  const shell = dialog.getByRole('combobox', { name: '集成终端 Shell', exact: true });
+  await shell.getByText('Git Shell', { exact: true }).waitFor();
+  const snapshot = () =>
+    dialog.evaluate((node) => {
+      const bounds = node.getBoundingClientRect();
+      const menu = node.querySelector('[role="listbox"]')?.getBoundingClientRect();
+      return {
+        layout: {
+          scrollLeft: node.scrollLeft,
+          scrollWidth: node.scrollWidth,
+          labelX: node.querySelector('.settings-row strong')!.getBoundingClientRect().x,
+          closeX: node.querySelector('.native-settings-close')!.getBoundingClientRect().x,
+        },
+        contained:
+          !menu ||
+          (menu.left >= bounds.left &&
+            menu.right <= bounds.right &&
+            menu.top >= bounds.top &&
+            menu.bottom <= bounds.bottom),
+      };
+    });
+  const before = await snapshot();
+  await shell.click();
+  const powershell = dialog.getByRole('option', { name: 'PowerShell 5.1.26100.10068' });
+  await powershell.waitFor();
+  assert.deepEqual(await snapshot(), before);
+  await page.keyboard.press('ArrowDown');
+  await page.waitForFunction(
+    () => document.activeElement?.textContent === 'PowerShell 5.1.26100.10068',
+  );
+  assert.deepEqual(await snapshot(), before);
+  await page.keyboard.press('Escape');
+  await dialog.getByRole('listbox').waitFor({ state: 'hidden' });
+  assert.deepEqual(await snapshot(), before);
+  assert.equal(await shell.evaluate((node) => node === document.activeElement), true);
+}
+
 export async function verifySettingsGeometry(browser: Browser, url: string, artifact: string) {
   const cases = [];
   for (const theme of ['light', 'dark'] as const) {
@@ -1715,8 +1753,8 @@ export async function verifySettingsGeometry(browser: Browser, url: string, arti
       page.on('pageerror', (error) => errors.push(error.message));
       try {
         await page.goto(`${url}?settings-geometry=1`);
-        await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-        await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+        await page.getByRole('button', { name: '打开设置', exact: true }).click();
+        await verifySettingsSelectPlacement(page);
         await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
         await page.evaluate(() => {
           const read = () => {
@@ -1933,8 +1971,7 @@ export async function verifyMcpSettingsProduct(browser: Browser, url: string, ar
       page.on('pageerror', (error) => errors.push(error.message));
       try {
         await page.goto(`${url}?settings-geometry=1`);
-        await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-        await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+        await page.getByRole('button', { name: '打开设置', exact: true }).click();
         await page.getByRole('button', { name: 'MCP', exact: true }).click();
         const readListRow = (selector: string) =>
           page
@@ -2111,8 +2148,7 @@ export async function verifyMcpFailureFeedback(browser: Browser, url: string, ar
       page.on('pageerror', (error) => errors.push(error.message));
       try {
         await page.goto(`${url}?settings-geometry=1&mcp-errors=1`);
-        await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-        await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+        await page.getByRole('button', { name: '打开设置', exact: true }).click();
         await page.getByRole('button', { name: 'MCP', exact: true }).click();
         const panel = page.locator('.settings-editor-panel');
         for (const [name, message] of [
@@ -2223,8 +2259,7 @@ export async function verifyMcpCustomForms(browser: Browser, url: string, artifa
       page.on('pageerror', (error) => errors.push(error.message));
       try {
         await page.goto(`${url}?settings-geometry=1`);
-        await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-        await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+        await page.getByRole('button', { name: '打开设置', exact: true }).click();
         await page.getByRole('button', { name: 'MCP', exact: true }).click();
         await page.getByRole('button', { name: '新增 MCP', exact: true }).click();
         const panel = page.locator('.settings-editor-panel');

@@ -1492,8 +1492,7 @@ try {
       if (settingsModels)
         await page.evaluate(() => window.liveAggregationFixture.settings('start'));
       const openSettings = async () => {
-        await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-        await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+        await page.getByRole('button', { name: '打开设置', exact: true }).click();
         await page.locator('.desktop-settings-dialog').waitFor();
       };
       const back = page.getByRole('button', { name: '返回应用', exact: true });
@@ -1774,7 +1773,7 @@ try {
             .getBoundingClientRect().bottom,
           directoryTop: node
             .closest('.provider-settings')!
-            .querySelector('.provider-directory-heading')!
+            .querySelector('.provider-directory')!
             .getBoundingClientRect().top,
         }));
         assert.equal(
@@ -2050,7 +2049,7 @@ try {
           async () => (await window.liveAggregationFixture.settings('state')).pending === 1,
         );
         assert.equal(
-          await page.getByRole('button', { name: '正在保存…', exact: true }).isDisabled(),
+          await page.getByRole('button', { name: '保存提供商配置', exact: true }).isDisabled(),
           true,
         );
         await stage('settings-provider-held');
@@ -3193,16 +3192,14 @@ try {
             await item.locator(':scope > .tool-activity-summary').getAttribute('aria-expanded'),
             'true',
           );
-          const profile = await page.locator('.profile-avatar').evaluate((node) => ({
-            width: getComputedStyle(node).width,
-            height: getComputedStyle(node).height,
-          }));
-          assert.deepEqual(
-            profile,
-            { width: '20px', height: '20px' },
-            'special profile icon changed',
-          );
-          iconChecks.push({ name: 'special profile', graphic: profile });
+          const settings = page.getByRole('button', { name: '打开设置', exact: true });
+          const tasks = page.getByRole('button', { name: '定时任务', exact: true });
+          const taskBounds = await tasks.boundingBox();
+          assert.ok(taskBounds);
+          await defaultIcon('settings', settings.locator('svg'), settings, {
+            width: taskBounds.width,
+            height: 32,
+          });
         }
         const liveNode = await item.elementHandle();
         assert.ok(liveNode);

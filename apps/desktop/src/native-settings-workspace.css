@@ -49,6 +49,13 @@ html[data-settings-macos] .kite-client.native-settings-floating {
   --settings-inset-top: 52px;
   --settings-inset-bottom: 24px;
 }
+.kite-client .native-settings-select-content {
+  max-inline-size: var(--radix-select-content-available-width);
+}
+.kite-client .native-settings-select-content [data-slot="select-item"] > span:first-child {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
 .kite-client.native-settings-discard {
   z-index: 53;
   max-width: min(420px, calc(100vw - 36px));

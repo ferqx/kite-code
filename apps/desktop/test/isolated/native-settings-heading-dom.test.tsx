@@ -82,7 +82,7 @@ test('all Settings categories render a consistent heading and detail retains its
       );
       expect(headings).toHaveLength(1);
       expect(headings[0]?.querySelector('h2')?.textContent).toBe(title);
-      expect(headings[0]?.querySelector('p')?.textContent?.trim()).toBeTruthy();
+      expect(headings[0]?.querySelector('p')).toBeNull();
     }
     const detailFocus = createRef<HTMLHeadingElement>();
     await act(async () =>

@@ -5,26 +5,31 @@ import FirstRunShell from './FirstRunShell';
 export default function WorkspaceTrustGate({
   path,
   readScopes,
+  pending,
   onTrust,
   onExit,
 }: {
   path: string;
   readScopes: readonly { kind: string; description: string }[];
+  pending: boolean;
   onTrust(): void;
   onExit(): void;
 }) {
   const [choice, setChoice] = useState<'trust' | 'decline'>('decline');
   const theme = useInkTheme(),
     { t } = useInkI18n();
-  useInput((input, key) => {
-    if (key.escape || (key.ctrl && input === 'c')) return onExit();
-    if (key.upArrow || key.downArrow)
-      setChoice((value) => (value === 'trust' ? 'decline' : 'trust'));
-    else if (key.return) {
-      if (choice === 'trust') onTrust();
-      else onExit();
-    }
-  });
+  useInput(
+    (input, key) => {
+      if (key.escape || (key.ctrl && input === 'c')) return onExit();
+      if (key.upArrow || key.downArrow)
+        setChoice((value) => (value === 'trust' ? 'decline' : 'trust'));
+      else if (key.return) {
+        if (choice === 'trust') onTrust();
+        else onExit();
+      }
+    },
+    { isActive: !pending },
+  );
   return (
     <FirstRunShell footer={t('firstRun.navigateConfirmExit')}>
       <Text color={theme.muted}>{t('trust.openWorkspace')}</Text>

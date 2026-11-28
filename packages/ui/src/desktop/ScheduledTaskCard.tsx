@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
+import { useErrorFeedback } from './error-feedback';
 import {
   type ScheduledTaskMutation,
   type ScheduledTaskRunSummary,
@@ -107,6 +108,8 @@ export function ScheduledTaskCard({
     pendingRef = useRef(false);
   const [error, setError] = useState<string>();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const card = useRef<HTMLElement>(null);
+  const reportError = useErrorFeedback();
   async function perform(action: () => ScheduledTaskMutation) {
     if (pendingRef.current) return;
     pendingRef.current = true;
@@ -116,7 +119,10 @@ export function ScheduledTaskCard({
       await action();
       setConfirmDelete(false);
     } catch (failure) {
-      setError(scheduledTaskError(failure));
+      if (!card.current?.isConnected) return;
+      const message = scheduledTaskError(failure);
+      if (reportError) reportError(`操作失败：${message}`);
+      else setError(message);
     } finally {
       pendingRef.current = false;
       setPending(false);
@@ -124,6 +130,7 @@ export function ScheduledTaskCard({
   }
   return (
     <article
+      ref={card}
       className="scheduled-card"
       aria-label={task.name}
       aria-busy={pending}

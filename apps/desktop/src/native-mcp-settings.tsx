@@ -17,6 +17,7 @@ import {
   type McpFeedbackNotice,
   mcpFeedbackNotices,
 } from './native-mcp-feedback';
+import { useNativeSettingsFeedback } from './native-settings-feedback';
 import { NativeSettingsDetail, NativeSettingsHeading } from './native-settings-heading';
 import { NativeSettingsListRow } from './native-settings-list-row';
 
@@ -25,6 +26,13 @@ const pending = (value: NativeUserMcpSubmission) =>
   ['submitting', 'pending', 'outcome_unknown'].includes(value.phase);
 const errorCode = (error: unknown) =>
   (error as { code?: string })?.code ?? (error as Error)?.message ?? '';
+const isConfigurationWrite = (operation: NativeUserMcpOperation) =>
+  operation.kind === 'add' || operation.kind === 'remove' || operation.kind === 'enabled';
+const isConfigurationFailure = (row: NativeUserMcpSubmission) =>
+  row.phase === 'failed' &&
+  !row.legacy &&
+  row.association === 'current' &&
+  isConfigurationWrite(row.operation);
 const operationLabel: Record<NativeUserMcpOperation['kind'], string> = {
   add: '添加 MCP',
   remove: '删除 MCP',
@@ -113,6 +121,7 @@ export function NativeMcpSettings({
     heading = useRef<HTMLHeadingElement>(null);
   const identity = `${generation}/${storeId ?? ''}`,
     current = useRef(identity);
+  const feedback = useNativeSettingsFeedback(identity);
   current.current = identity;
   const readVersion = useRef(0),
     toolVersion = useRef(0),
@@ -123,6 +132,18 @@ export function NativeMcpSettings({
   const records = new Map(submissions.map((row) => [row.commandId, row]));
   for (const row of local) if (!records.has(row.commandId)) records.set(row.commandId, row);
   const notices = mcpFeedbackNotices([...records.values()], facts?.sources ?? [], dismissed);
+  const inlineNotices = feedback.handled
+    ? notices.filter(({ row }) => !isConfigurationFailure(row))
+    : notices;
+  const announceConfigurationFailures = useEffectEvent(() => {
+    for (const { row } of notices) {
+      if (isConfigurationFailure(row) && local.some(({ commandId }) => commandId === row.commandId))
+        feedback.report(row.commandId, errorMessage(row.error, row.operation));
+    }
+  });
+  // A local operation can settle in Main before its submit or lookup reply reaches this page.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: observe local and authoritative changes with current notices.
+  useEffect(() => announceConfigurationFailures(), [local, submissions]);
   const pendingOperation = [...records.values()].some(
     (row) => row.storeId === storeId && pending(row) && (!row.legacy || row.legacyUser),
   );
@@ -189,7 +210,17 @@ export function NativeMcpSettings({
         throw Error('mcp_source_unavailable');
       return result as NativeUserMcpResult;
     } catch (cause) {
-      if (current.current === original && isCurrent()) setError(errorCode(cause));
+      if (current.current === original && isCurrent()) {
+        const code = errorCode(cause);
+        if (
+          feedback.handled &&
+          input.method === 'settings.userMcp.submit' &&
+          isConfigurationWrite(input.operation)
+        ) {
+          feedback.reset('configuration-request');
+          feedback.report('configuration-request', errorMessage(code, input.operation));
+        } else setError(code);
+      }
     }
     return undefined;
   }
@@ -645,7 +676,6 @@ export function NativeMcpSettings({
     >
       <NativeSettingsHeading
         title="MCP"
-        description="连接工具服务，扩展助手的能力。"
         actions={
           <div className="provider-page-actions">
             <Button
@@ -680,10 +710,6 @@ export function NativeMcpSettings({
       ))}
       {facts && (
         <section className="catalogue-section" aria-label="MCP sources">
-          <div className="provider-directory-heading">
-            <h3>我的 MCP</h3>
-            <span>{facts.sources.length}</span>
-          </div>
           <ul className="provider-instance-list">
             {facts.sources.map((row) => (
               <NativeSettingsListRow
@@ -724,7 +750,7 @@ export function NativeMcpSettings({
           )}
         </section>
       )}
-      {notices
+      {inlineNotices
         .filter((notice) => pending(notice.row) && !belongsToPanel(notice))
         .map(operationNotice)}
       {panel &&
@@ -948,7 +974,7 @@ export function NativeMcpSettings({
                     </section>
                   )}
                   {alert}
-                  {notices.filter(belongsToPanel).map(operationNotice)}
+                  {inlineNotices.filter(belongsToPanel).map(operationNotice)}
                 </div>
                 {(panel.kind === 'add' || review) && (
                   <footer className="provider-editor-footer right-sidebar-editor-footer">
@@ -980,8 +1006,9 @@ export function NativeMcpSettings({
                         form={`${fieldId}-add`}
                         className="provider-button provider-save"
                         disabled={!writable}
+                        aria-busy={busy || pendingOperation || undefined}
                       >
-                        {busy || pendingOperation ? '正在添加…' : '添加'}
+                        添加
                       </Button>
                     )}
                   </footer>

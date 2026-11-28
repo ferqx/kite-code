@@ -1,19 +1,5 @@
 /* Read-only Web Search preferences. Provider setup lives in the existing model settings. */
-.kite-client .search-pref-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 32px;
-  margin-bottom: 6px;
-}
-.kite-client .search-pref-heading h3 {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--muted-foreground);
-}
-.kite-client .search-pref-heading .search-manage {
+.kite-client .search-manage {
   display: inline-flex;
   gap: 3px;
   align-items: center;
@@ -21,7 +7,7 @@
   color: var(--muted-foreground);
   font-size: 12px;
 }
-.kite-client .search-pref-heading .search-manage:hover {
+.kite-client .search-manage:hover {
   color: var(--foreground);
 }
 .kite-client .search-manage svg {

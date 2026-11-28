@@ -125,6 +125,17 @@ if (settingsGeometry) {
   const request = control.bridge.request.bind(control.bridge);
   control.bridge.request = async (input) => {
     if (input.method === 'scheduled.list') return { kind: 'scheduled.tasks', tasks: [], runs: [] };
+    if (input.method === 'settings.general.shell.read')
+      return {
+        kind: 'settings.general.shell',
+        storeId: 'store',
+        preference: 'git-bash',
+        automatic: 'git-bash',
+        gitBashAvailable: true,
+        powerShellAvailable: true,
+        powerShellVersion: '5.1.26100.10068',
+        powerShell7Version: null,
+      };
     if (input.method === 'settings.models.read')
       return {
         kind: 'settings.models',

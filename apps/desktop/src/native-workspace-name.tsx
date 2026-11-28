@@ -9,6 +9,8 @@ import {
   Input,
 } from '@kite-ai/ui/desktop';
 import { useId, useRef, useState } from 'react';
+import { useNativeErrorFeedback } from './native-error-feedback';
+import { NativeToast } from './native-message';
 import { isWorkspaceDisplayName } from './native-workspace-name-policy';
 
 export function NativeWorkspaceNameDialog({
@@ -25,6 +27,8 @@ export function NativeWorkspaceNameDialog({
   const [value, setValue] = useState(name);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
+  const [toastHost, setToastHost] = useState<HTMLDivElement | null>(null);
+  const feedback = useNativeErrorFeedback('workspace-name');
   const saving = useRef(false);
   const inputId = useId();
   const errorId = useId();
@@ -32,7 +36,8 @@ export function NativeWorkspaceNameDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && !saving.current && onClose()}>
       <DialogContent
-        className="kite-client max-w-sm gap-3 border-border p-5"
+        className="kite-client native-management-dialog max-w-sm gap-3 border-border p-5"
+        ref={setToastHost}
         showCloseButton={false}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
@@ -66,7 +71,7 @@ export function NativeWorkspaceNameDialog({
               if (next !== name) await onSave(next);
               onClose();
             } catch {
-              setError('项目名称保存失败，请重试。');
+              feedback.report('项目名称保存失败，请重试。');
             } finally {
               saving.current = false;
               setPending(false);
@@ -100,10 +105,17 @@ export function NativeWorkspaceNameDialog({
               取消
             </Button>
             <Button type="submit" disabled={pending} aria-busy={pending || undefined}>
-              {pending ? '保存中…' : '保存'}
+              保存
             </Button>
           </DialogFooter>
         </form>
+        {toastHost && (
+          <NativeToast
+            container={toastHost}
+            message={feedback.message}
+            onDismiss={feedback.dismiss}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

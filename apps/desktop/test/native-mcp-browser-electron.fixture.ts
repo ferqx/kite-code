@@ -99,7 +99,7 @@ try {
   async function settings() {
     settingsUi = await openNativeSettingsPage(app!, page);
     await settingsUi.getByRole('button', { name: 'MCP', exact: true }).click();
-    await panel().getByRole('heading', { name: '我的 MCP', exact: true }).waitFor();
+    await panel().getByRole('region', { name: 'MCP sources', exact: true }).waitFor();
     await ready();
   }
   async function returnToList() {

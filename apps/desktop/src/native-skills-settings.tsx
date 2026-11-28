@@ -396,7 +396,6 @@ export function NativeSkillsSettings({
     >
       <NativeSettingsHeading
         title="Skills"
-        description="查看内置和个人 Skills，或搜索并安装更多 Skills。"
         actions={
           <div className="provider-page-actions">
             <Button
@@ -448,10 +447,6 @@ export function NativeSkillsSettings({
                   )
                 ) : (
                   <>
-                    <div className="provider-directory-heading">
-                      <span>已发现的 Skills</span>
-                      <span>{facts.entries.length}</span>
-                    </div>
                     <ul className="provider-instance-list" aria-label="Skills 条目">
                       {facts.entries.map((item) => (
                         <NativeSettingsListRow
@@ -589,6 +584,7 @@ export function NativeSkillsSettings({
                         className="provider-button provider-delete-link"
                         type="button"
                         disabled={busy || !!error || uninstall?.busy}
+                        aria-busy={detailUninstall?.busy || undefined}
                         onClick={() =>
                           setUninstall({
                             panel: detail,
@@ -597,7 +593,7 @@ export function NativeSkillsSettings({
                           })
                         }
                       >
-                        {detailUninstall?.busy ? '正在卸载…' : '卸载'}
+                        卸载
                       </Button>
                     )
                   )}

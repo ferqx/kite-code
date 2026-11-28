@@ -8,6 +8,7 @@ import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model
 import type { NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
 import { nativeRootPage } from './native-root-page.fixture';
+import { closeNativeSettingsPage, openNativeSettingsPage } from './native-settings-page.fixture';
 import { promptText } from './prompt-editor-text.fixture';
 
 async function observedState(
@@ -409,17 +410,23 @@ async function readOriginalTheme(page: import('playwright').Page, cold: boolean)
     );
   }
   async function choose(preference: 'dark' | 'light' | 'system', label: string) {
-    await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-    await page.getByRole('menuitemradio', { name: label, exact: true }).click();
-    assert.equal(await page.evaluate(() => localStorage.getItem('kite.desktop.theme')), preference);
+    const settings = await openNativeSettingsPage(app!, page);
+    const appearance = settings.getByRole('button', { name: '外观', exact: true });
+    if (!(await appearance.isVisible()))
+      await settings.locator('.native-settings-back[data-back-to="categories"]').click();
+    await appearance.click();
+    await settings.getByRole('combobox', { name: '外观', exact: true }).click();
+    await settings.getByRole('option', { name: label, exact: true }).click();
     await matches(preference);
+    assert.equal(await page.evaluate(() => localStorage.getItem('kite.desktop.theme')), preference);
+    await closeNativeSettingsPage(app!);
   }
   assert.equal(
     await page.evaluate(() => localStorage.getItem('kite.desktop.theme') ?? 'system'),
     cold ? 'dark' : 'system',
   );
   await matches(cold ? 'dark' : 'system');
-  await choose('light', '亮');
+  await choose('light', '浅色');
   await choose('system', '跟随系统');
   // Drive the real Electron appearance engine, without changing the user's OS settings.
   await app!.evaluate(({ nativeTheme }) => {
@@ -434,10 +441,10 @@ async function readOriginalTheme(page: import('playwright').Page, cold: boolean)
     nativeTheme.themeSource = 'system';
   });
   await matches('system');
-  await choose('dark', '暗');
+  await choose('dark', '深色');
   assert.equal(await (await fetch(`${control}/count`)).text(), before);
   console.log(
-    'native_driver_stage: original theme menu, window background, engine updates and cold preference with zero Model work',
+    'native_driver_stage: appearance settings, window background, engine updates and cold preference with zero Model work',
   );
 }
 

@@ -237,20 +237,15 @@ export function TuiOnboarding({
         onExit={onExit}
       />
     );
-  if (phase === 'trust')
+  if (phase === 'trust' || phase === 'trust-saving')
     return (
       <WorkspaceTrustGate
         path={path}
         readScopes={snapshot?.readScopes ?? []}
+        pending={phase === 'trust-saving'}
         onTrust={() => void run((signal) => port.trust(workspaceId, signal), true)}
         onExit={onExit}
       />
-    );
-  if (phase === 'trust-saving')
-    return (
-      <FirstRunShell footer="">
-        <Text>Saving workspace trust…</Text>
-      </FirstRunShell>
     );
   if (phase === 'models')
     return (

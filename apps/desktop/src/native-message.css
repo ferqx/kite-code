@@ -14,6 +14,12 @@
   pointer-events: none;
 }
 
+.native-management-dialog > .native-toast {
+  position: absolute;
+  inset: auto auto calc(100% + 12px) 50%;
+  max-width: calc(100vw - 32px);
+}
+
 .native-toast-card {
   display: flex;
   align-items: center;

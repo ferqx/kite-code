@@ -83,21 +83,20 @@ export function TuiPreferencePanel({ controller }: { controller: TuiController }
         />
       }
       message={
-        state.preferenceStatus !== 'confirmed' || state.preferenceSaved ? (
+        state.preferenceStatus !== 'saving' &&
+        (state.preferenceStatus !== 'confirmed' || state.preferenceSaved) ? (
           <OverlayMessage tone={state.preferenceError ? 'error' : 'info'}>
             {state.preferenceStatus === 'confirmed'
               ? t('Preference saved')
               : state.preferenceStatus === 'loading'
                 ? t('Reading preferences')
-                : state.preferenceStatus === 'saving'
-                  ? t('Saving preference')
-                  : state.preferenceError === 'tui_preferences_publication_uncertain'
-                    ? t(
-                        'Save outcome unknown; last confirmed values retained. R rereads original preferences before another choice.',
-                      )
-                    : t(
-                        'Preference failed; previous values retained. R rereads before another choice.',
-                      )}
+                : state.preferenceError === 'tui_preferences_publication_uncertain'
+                  ? t(
+                      'Save outcome unknown; last confirmed values retained. R rereads original preferences before another choice.',
+                    )
+                  : t(
+                      'Preference failed; previous values retained. R rereads before another choice.',
+                    )}
             {state.preferenceError && ` · ${terminalText(state.preferenceError)}`}
           </OverlayMessage>
         ) : undefined

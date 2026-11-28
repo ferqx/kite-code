@@ -1257,9 +1257,6 @@ export function NativeProviderSettings({
     >
       <NativeSettingsHeading
         title={models ? '提供商与模型' : '提供商'}
-        description={
-          models ? '连接模型服务，管理可用模型。' : '连接你的模型服务，按需配置接口与模型。'
-        }
         actions={
           <div className="provider-page-actions">
             {!models && (
@@ -1333,10 +1330,6 @@ export function NativeProviderSettings({
       )}
       <div className="provider-workspace">
         <div className="provider-directory">
-          <div className="provider-directory-heading">
-            <span>已添加的提供商</span>
-            <span>{facts ? entries.length : '—'}</span>
-          </div>
           <ul aria-label="提供商列表" className="provider-instance-list">
             {entries.map(({ provider: entry, connection: item }) => {
               const label = connectionLabel(entry, item);
@@ -1393,7 +1386,7 @@ export function NativeProviderSettings({
                           aria-busy={(selected && panelMode === 'remove' && writing) || undefined}
                           onClick={(event) => void remove(entry, item, event.currentTarget)}
                         >
-                          {selected && panelMode === 'remove' && writing ? '正在删除…' : '删除'}
+                          删除
                         </Button>
                       </div>
                     )}
@@ -1835,7 +1828,7 @@ export function NativeProviderSettings({
                         disabled={!writable || directory.loading}
                         aria-busy={writing || undefined}
                       >
-                        {writing ? '正在保存…' : '保存提供商配置'}
+                        保存提供商配置
                       </Button>
                     </footer>
                   </form>

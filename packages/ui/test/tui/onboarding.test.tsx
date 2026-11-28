@@ -66,6 +66,44 @@ test('trust gate defaults to exit; pressing Enter does not record trust', async 
     ui.unmount();
   }
 });
+test('saving workspace trust keeps the prompt stable and blocks repeated choices', async () => {
+  const pending = Promise.withResolvers<Awaited<ReturnType<TuiOnboardingPort['trust']>>>();
+  const source = port(async () => ({ trusted: false, hasModels: false, readScopes: [] }));
+  let trusts = 0;
+  let ready = 0;
+  let exits = 0;
+  source.trust = () => {
+    trusts++;
+    return pending.promise;
+  };
+  const ui = render(
+    <TuiOnboarding
+      port={source}
+      workspaceId="w"
+      path="/workspace"
+      onReady={() => ready++}
+      onExit={() => exits++}
+    />,
+  );
+  try {
+    await until(() => ui.lastFrame()?.includes('/workspace') === true);
+    const original = ui.lastFrame();
+    ui.stdin.write('\u001b[A');
+    await until(() => ui.lastFrame() !== original);
+    const chosen = ui.lastFrame();
+    ui.stdin.write('\r');
+    await until(() => trusts === 1);
+    ui.stdin.write('\r');
+    ui.stdin.write('\u001b');
+    await until(() => ui.lastFrame() === chosen);
+    expect(trusts).toBe(1);
+    expect(exits).toBe(0);
+    pending.resolve({ status: 'ready', modelName: 'confirmed' });
+    await until(() => ready === 1);
+  } finally {
+    ui.unmount();
+  }
+});
 test('configured confirmed default skips first run while errors remain retryable without writes', async () => {
   let ready = 0,
     reads = 0;

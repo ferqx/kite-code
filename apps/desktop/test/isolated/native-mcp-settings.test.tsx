@@ -22,6 +22,7 @@ Object.assign(globalThis, {
   navigator: bootstrap.window.navigator,
 });
 const { createRoot } = await import('react-dom/client');
+const { ErrorFeedbackContext } = await import('@kite-ai/ui/desktop');
 const { NativeMcpSettings } = await import('../../src/native-mcp-settings');
 Object.assign(globalThis, priorBootstrap);
 bootstrap.window.close();
@@ -65,6 +66,7 @@ async function fixture(
       generation?: number;
       submissions?: readonly NativeUserMcpSubmission[];
       bridge?: NativeBridge;
+      onError?: (message: string) => void;
     }) => Promise<void>;
     root: ReturnType<typeof createRoot>;
   }) => Promise<void>,
@@ -132,17 +134,20 @@ async function fixture(
       generation?: number;
       submissions?: readonly NativeUserMcpSubmission[];
       bridge?: NativeBridge;
+      onError?: (message: string) => void;
     } = {},
   ) => {
     await act(async () =>
       root.render(
-        <NativeMcpSettings
-          panelHost={panel}
-          bridge={options.bridge ?? bridge}
-          generation={options.generation ?? 1}
-          storeId={options.storeId ?? 'store'}
-          submissions={options.submissions ?? []}
-        />,
+        <ErrorFeedbackContext.Provider value={options.onError}>
+          <NativeMcpSettings
+            panelHost={panel}
+            bridge={options.bridge ?? bridge}
+            generation={options.generation ?? 1}
+            storeId={options.storeId ?? 'store'}
+            submissions={options.submissions ?? []}
+          />
+        </ErrorFeedbackContext.Provider>,
       ),
     );
   };
@@ -181,6 +186,40 @@ const menuItem = (panel: HTMLElement, label: string) =>
   [...panel.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
     (item) => item.textContent === label,
   )!;
+
+test('a failed configuration change reports once without inserting an error into the editor', async () =>
+  fixture(async ({ host, panel, bridge, render }) => {
+    const errors: string[] = [];
+    const onError = (message: string) => errors.push(message);
+    let failure: NativeUserMcpSubmission | undefined;
+    const controlled = {
+      ...bridge,
+      async request(input: NativeUserMcpRequest) {
+        if (input.method !== 'settings.userMcp.submit') return bridge.request(input);
+        failure = {
+          ...original,
+          operation: input.operation,
+          phase: 'failed',
+          error: 'mcp_source_exists',
+        };
+        return failure;
+      },
+    } as NativeBridge;
+    await render({ bridge: controlled, onError });
+    await act(async () => button(host, '新增 MCP').click());
+    await act(async () => {
+      type(panel, 'Name', 'Knowledge');
+      type(panel, 'URL or command', 'https://example.com/mcp');
+    });
+    await act(async () => button(panel, '添加').click());
+    expect(failure).toBeDefined();
+    expect(errors).toEqual(['此名称的 MCP 服务已存在，请使用其他名称。']);
+    expect(panel.querySelector('[role="alert"]')).toBeNull();
+    expect(button(panel, '添加').disabled).toBe(false);
+    await render({ bridge: controlled, onError, submissions: [failure!] });
+    expect(errors).toHaveLength(1);
+    expect(panel.querySelector<HTMLInputElement>('[aria-label="Name"]')?.value).toBe('Knowledge');
+  }));
 
 test('STDIO form submits ordered arguments, explicit environment names and a working directory', async () =>
   fixture(async ({ host, panel, calls, render }) => {
@@ -766,7 +805,7 @@ test('an accepted asynchronous add freezes its draft and closes only after the o
     expect(panel.textContent).not.toContain('正在处理');
     expect(panel.querySelector('[aria-label="MCP 操作结果"]')).toBeNull();
     expect(panel.querySelector<HTMLInputElement>('input[aria-label="Name"]')?.disabled).toBe(true);
-    expect(button(panel, '正在添加…').disabled).toBe(true);
+    expect(button(panel, '添加').disabled).toBe(true);
     expect(button(panel, '取消添加')).not.toBeUndefined();
     await act(async () => Bun.sleep(800));
     expect(panel.textContent).toBe('');

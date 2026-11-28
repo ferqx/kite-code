@@ -1094,7 +1094,7 @@ for (const pendingStage of ['save', 'after-save read'] as const) {
         await f.edit('API 协议', 'responses');
         await f.edit('模型名称', 'saved-old-editor-model');
         await f.click('保存提供商配置');
-        expect(f.button('正在保存…').disabled).toBe(true);
+        expect(f.button('保存提供商配置').disabled).toBe(true);
         expect(reads).toBe(pendingStage === 'save' ? 1 : 2);
         const trigger = nextProvider === 'same' ? '编辑 OpenAI-compatible 1' : '编辑 DeepSeek';
         await f.click(trigger);
@@ -2074,8 +2074,8 @@ test('Repeated Add submission is synchronously blocked while its original reques
     });
     expect(calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
     await act(async () => render([submitting]));
-    expect(f.button('正在保存…').disabled).toBe(true);
-    expect(f.button('正在保存…').getAttribute('aria-busy')).toBe('true');
+    expect(f.button('保存提供商配置').disabled).toBe(true);
+    expect(f.button('保存提供商配置').getAttribute('aria-busy')).toBe('true');
     expect(f.panelHost.querySelectorAll('.provider-notice')).toHaveLength(0);
     expect(f.toast()?.textContent).toBeUndefined();
     await act(async () => release());

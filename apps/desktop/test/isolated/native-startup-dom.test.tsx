@@ -198,15 +198,19 @@ test('retained startup hides the entire product until admitted attach and the co
       [...f.host.querySelectorAll('button')].find(
         (entry) => entry.textContent === label || entry.getAttribute('aria-label') === label,
       );
+    const diagnosticSettings = () =>
+      [...f.host.querySelectorAll('button:not([aria-label])')].some(
+        (entry) => entry.textContent === '设置',
+      );
     expect(button('会话工具')).toBeUndefined();
-    expect(button('设置')).toBeUndefined();
+    expect(diagnosticSettings()).toBe(false);
     expect(button('重新读取目录')).toBeUndefined();
-    expect(button('用户菜单')).toBeDefined();
+    expect(button('打开设置')).toBeDefined();
     expect(button('发送首条消息')?.disabled).toBe(true);
     const ordinaryCalls = [...f.calls];
     await f.render(true, true);
     expect(button('会话工具')).toBeDefined();
-    expect(button('设置')).toBeDefined();
+    expect(diagnosticSettings()).toBe(true);
     expect(button('重新读取目录')).toBeDefined();
     expect(f.host.querySelector('input[aria-label="先审核计划"]')).not.toBeNull();
     expect(button('选择模型')).toBeDefined();

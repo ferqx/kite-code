@@ -100,69 +100,70 @@ export function NativeWebSearchSettings({
       aria-label="网页搜索设置"
       aria-busy={!!busy}
     >
-      <NativeSettingsHeading title="网页搜索" description="跟随模型与提供商，无需单独配置。" />
+      <NativeSettingsHeading
+        title="网页搜索"
+        actions={
+          facts &&
+          fallback &&
+          onManageProviders && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="search-manage"
+              onClick={onManageProviders}
+            >
+              管理提供商
+              <svg aria-hidden="true" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="m6 4 4 4-4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </Button>
+          )
+        }
+      />
       {facts && fallback && (
-        <>
-          <div className="search-pref-heading">
-            <h3>搜索来源</h3>
-            {onManageProviders && (
-              <Button
-                type="button"
-                variant="ghost"
-                className="search-manage"
-                onClick={onManageProviders}
-              >
-                管理提供商
-                <svg aria-hidden="true" viewBox="0 0 16 16" fill="none">
-                  <path
-                    d="m6 4 4 4-4 4"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </Button>
-            )}
-          </div>
-          <ul className="search-pref-list" aria-label="搜索来源">
-            <li className="search-pref-row">
-              <span className="search-pref-mark">
-                <SettingsNavigationIcon name="webSearch" />
+        <ul className="search-pref-list" aria-label="搜索来源">
+          <li className="search-pref-row">
+            <span className="search-pref-mark">
+              <SettingsNavigationIcon name="webSearch" />
+            </span>
+            <div className="search-pref-copy">
+              <strong>模型自带搜索</strong>
+              <span>
+                {off
+                  ? '网页搜索已关闭。'
+                  : nativeFirst
+                    ? '当前模型和权限支持时，优先使用。'
+                    : '当前设置指定了搜索服务。'}
               </span>
-              <div className="search-pref-copy">
-                <strong>模型自带搜索</strong>
-                <span>
-                  {off
-                    ? '网页搜索已关闭。'
-                    : nativeFirst
-                      ? '当前模型和权限支持时，优先使用。'
-                      : '当前设置指定了搜索服务。'}
-                </span>
-              </div>
-              <span className="search-pref-state">
-                {off ? '已关闭' : nativeFirst ? '优先' : '未选用'}
-              </span>
-            </li>
-            <li className="search-pref-row">
-              <span className="search-pref-mark">
-                <SettingsNavigationIcon name="providers" />
-              </span>
-              <div className="search-pref-copy">
-                <strong>备用搜索</strong>
-                <span>{fallback.detail}</span>
-              </div>
-              <span
-                className="search-pref-state"
-                data-configured={
-                  (!off && facts.derivedDeepSeek?.status === 'configured') || undefined
-                }
-              >
-                {fallback.label}
-              </span>
-            </li>
-          </ul>
-        </>
+            </div>
+            <span className="search-pref-state">
+              {off ? '已关闭' : nativeFirst ? '优先' : '未选用'}
+            </span>
+          </li>
+          <li className="search-pref-row">
+            <span className="search-pref-mark">
+              <SettingsNavigationIcon name="providers" />
+            </span>
+            <div className="search-pref-copy">
+              <strong>备用搜索</strong>
+              <span>{fallback.detail}</span>
+            </div>
+            <span
+              className="search-pref-state"
+              data-configured={
+                (!off && facts.derivedDeepSeek?.status === 'configured') || undefined
+              }
+            >
+              {fallback.label}
+            </span>
+          </li>
+        </ul>
       )}
       {error && (
         <div className="search-pref-result" role="alert">

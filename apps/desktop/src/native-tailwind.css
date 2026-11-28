@@ -187,10 +187,13 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   margin-bottom: 28px;
 }
 .kite-client .desktop-settings .settings-page-heading h2 {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 24px;
   font-weight: 500;
   letter-spacing: -0.5px;
+}
+.kite-client .desktop-settings .settings-page-heading h2:not(:last-child) {
+  margin-block-end: 8px;
 }
 .kite-client .desktop-settings .settings-page-heading p {
   margin: 0;
@@ -222,12 +225,6 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
 }
 .kite-client .desktop-settings .right-sidebar-heading h2 {
   font-weight: 500;
-}
-.kite-client .desktop-settings .settings-content .settings-group-heading {
-  margin: 0 0 12px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 20px;
 }
 @container settings-content (max-width: 540px) {
   .kite-client .desktop-settings .settings-page-heading {

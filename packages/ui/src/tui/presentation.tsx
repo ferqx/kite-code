@@ -703,7 +703,6 @@ export const tuiChinese: Readonly<Record<string, string>> = {
     '保存结果未知；保留最后确认值。R 读取原偏好后才能再次选择。',
   'Preference saved': '偏好已保存',
   'Reading preferences': '读取偏好中',
-  'Saving preference': '保存偏好中',
   'Preference failed; previous values retained. R rereads before another choice.':
     '偏好操作失败；保留原值。R 重读后才能再次选择。',
   'System language': '系统语言',

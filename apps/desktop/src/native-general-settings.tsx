@@ -23,12 +23,8 @@ export function NativeGeneralSettings({
   const fieldId = useId();
   return (
     <section className="general-settings" aria-label="常规设置">
-      <NativeSettingsHeading
-        title="常规"
-        description={windowsShell ? '管理文件打开方式和集成终端。' : '管理文件打开方式。'}
-      />
-      <h3 className="settings-group-heading">{windowsShell ? '文件与终端' : '文件'}</h3>
-      <div className="settings-card">
+      <NativeSettingsHeading title="常规" />
+      <div>
         <label className="settings-row" htmlFor={`${fieldId}-field-1`}>
           <span>
             <strong>默认文件打开位置</strong>

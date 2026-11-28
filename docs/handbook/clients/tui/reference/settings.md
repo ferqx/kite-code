@@ -10,7 +10,7 @@
 | 主题 | `/theme` | teal、blue、purple、cyan、mono 配色；不改变对话数据 |
 | MCP | `/mcp` | 配置范围、连接、认证按当前条目提供的操作 |
 
-语言、主题等终端偏好保存在所选 Profile 的 `ui/preferences.jsonc`；模型统一保存在用户根目录文件中。修改语言、主题不改变模型或权限。
+语言、主题等终端偏好保存在所选 Profile 的 `ui/preferences.jsonc`；模型统一保存在用户根目录文件中。修改语言、主题不改变模型或权限。保存期间保留原偏好面板和已确认的选择。
 
 配置保存失败需要修正权限或配置内容。手工编辑时保留合法 JSONC，不在共享截图或日志中暴露凭据。具体配置含义见[共享配置](../../../features/models-and-configuration.md)。
 

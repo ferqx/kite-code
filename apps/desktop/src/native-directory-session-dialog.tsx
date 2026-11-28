@@ -10,12 +10,13 @@ import {
 } from '@kite-ai/ui/desktop';
 import { useRef, useState } from 'react';
 import type { NativeSessionFacts } from './native-bridge';
+import { NativeToast, type NativeToastProps } from './native-message';
 
 export type DirectorySessionDialog = {
   kind: 'rename' | 'delete';
   label: string;
   facts?: NativeSessionFacts;
-  error?: string;
+  needsObservation?: boolean;
 };
 
 export function NativeDirectorySessionDialog({
@@ -26,6 +27,7 @@ export function NativeDirectorySessionDialog({
   returnFocus,
   onSubmit,
   observeAvailable,
+  toast,
 }: {
   dialog: DirectorySessionDialog;
   pending: boolean;
@@ -34,22 +36,25 @@ export function NativeDirectorySessionDialog({
   returnFocus: () => void;
   onSubmit: (title: string) => void;
   observeAvailable: boolean;
+  toast: NativeToastProps;
 }) {
   const [editedTitle, setEditedTitle] = useState<string>();
+  const [toastHost, setToastHost] = useState<HTMLDivElement | null>(null);
   const rename = dialog.kind === 'rename';
   const title = editedTitle ?? dialog.label;
   const bytes = new TextEncoder().encode(title.trim()).length;
   const valid =
     observeAvailable &&
     !!dialog.facts &&
-    !dialog.error &&
+    !dialog.needsObservation &&
     (!rename || (bytes > 0 && bytes <= 4096 && title.trim() !== dialog.facts.session.title));
   const cancel = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
   return (
     <Dialog open onOpenChange={(open) => !open && !pending && onClose()}>
       <DialogContent
-        className="kite-client session-management-dialog max-w-sm gap-3 border-border p-5"
+        className="kite-client native-management-dialog session-management-dialog max-w-sm gap-3 border-border p-5"
+        ref={setToastHost}
         showCloseButton={false}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
@@ -85,14 +90,13 @@ export function NativeDirectorySessionDialog({
               onChange={(event) => setEditedTitle(event.target.value)}
             />
           )}
-          {dialog.error && <p role="alert">{dialog.error}</p>}
           {rename && bytes > 4096 && <p role="alert">会话名称过长。</p>}
           {!observeAvailable && <p role="status">会话暂不可用，等待连接恢复。</p>}
           <DialogFooter>
             <Button ref={cancel} variant="outline" disabled={pending} onClick={onClose}>
               取消
             </Button>
-            {dialog.error ? (
+            {dialog.needsObservation ? (
               <Button
                 key="observe"
                 disabled={pending || !observeAvailable}
@@ -109,12 +113,14 @@ export function NativeDirectorySessionDialog({
                 type="submit"
                 variant={rename ? 'default' : 'destructive'}
                 disabled={pending || !valid}
+                aria-busy={pending || undefined}
               >
-                {pending ? (rename ? '保存中…' : '删除中…') : rename ? '保存' : '删除'}
+                {rename ? '保存' : '删除'}
               </Button>
             )}
           </DialogFooter>
         </form>
+        {toastHost && <NativeToast {...toast} container={toastHost} />}
       </DialogContent>
     </Dialog>
   );

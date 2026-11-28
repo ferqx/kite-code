@@ -59,7 +59,7 @@ type Installation =
   | { status: 'failed'; error: string };
 
 const installationAction: Record<Installation['status'], string> = {
-  installing: '安装中…',
+  installing: '安装',
   installed: '已安装',
   'already-installed': '已有同名 Skill',
   failed: '重试安装',
@@ -317,6 +317,7 @@ function SearchPanel({
                           type="button"
                           aria-label={`${action} ${entry.name}（${entry.source}）`}
                           aria-disabled={!actionable || undefined}
+                          aria-busy={state?.status === 'installing' || undefined}
                           onClick={() => {
                             if (actionable) void install(entry);
                           }}

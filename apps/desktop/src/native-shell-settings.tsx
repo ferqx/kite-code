@@ -1,4 +1,4 @@
-import { Button as DesktopButton } from '@kite-ai/ui/desktop';
+import { Button as DesktopButton, useErrorFeedback } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type {
   NativeSettingsRequestPort,
@@ -26,7 +26,8 @@ export function NativeShellSettings({
   const saving = useRef(false);
   const [pending, setPending] = useState(false);
   const [facts, setFacts] = useState<NativeShellSettingsFacts>();
-  const [error, setError] = useState<string>();
+  const [needsRead, setNeedsRead] = useState(false);
+  const reportError = useErrorFeedback();
   const read = useCallback(
     async (preference?: NativeShellPreference) => {
       const result = await bridge.request(
@@ -52,15 +53,17 @@ export function NativeShellSettings({
     observation.current?.abort();
     const current = new AbortController();
     observation.current = current;
-    setError(undefined);
+    setNeedsRead(false);
     void read()
       .then((value) => {
         if (!current.signal.aborted) setFacts(value);
       })
       .catch(() => {
-        if (!current.signal.aborted) setError('暂时无法读取集成终端设置。');
+        if (current.signal.aborted) return;
+        setNeedsRead(true);
+        reportError?.('暂时无法读取集成终端设置，请重新读取。');
       });
-  }, [read, storeId]);
+  }, [read, reportError, storeId]);
 
   useEffect(() => {
     refresh();
@@ -93,7 +96,6 @@ export function NativeShellSettings({
       return;
     saving.current = true;
     setPending(true);
-    setError(undefined);
     try {
       const value = await read(choice.value);
       if (!current.signal.aborted) setFacts(value);
@@ -103,8 +105,10 @@ export function NativeShellSettings({
       const value = await read().catch(() => undefined);
       if (current.signal.aborted) return;
       setFacts(value);
-      if (value?.preference !== choice.value)
-        setError(value ? '未确认这次选择，请重试。' : '无法确认保存结果，请重新读取。');
+      if (value?.preference !== choice.value) {
+        setNeedsRead(!value);
+        reportError?.(value ? '未确认这次选择，请重试。' : '无法确认保存结果，请重新读取。');
+      }
     } finally {
       saving.current = false;
       if (!current.signal.aborted) setPending(false);
@@ -112,7 +116,7 @@ export function NativeShellSettings({
   }
   const selectedUnavailable = options?.find(({ value }) => value === facts?.preference)?.disabled;
   return (
-    <div className="settings-row" aria-busy={pending || (!facts && !error) || undefined}>
+    <div className="settings-row" aria-busy={pending || (!facts && !needsRead) || undefined}>
       <span>
         <label htmlFor={id}>
           <strong>集成终端 Shell</strong>
@@ -121,10 +125,8 @@ export function NativeShellSettings({
           更改类型后仅对新会话生效。PowerShell 使用本机最高可用版本。
           {selectedUnavailable && ' 所选 Shell 当前不可用，请选择其他环境。'}
         </small>
-        {pending && <small role="status">正在保存…</small>}
-        {error && <small role="alert">{error}</small>}
       </span>
-      {!facts && error ? (
+      {!facts && needsRead ? (
         <DesktopButton type="button" variant="outline" onClick={refresh}>
           重新读取
         </DesktopButton>

@@ -295,7 +295,7 @@ test('Skills.sh installation retries an explicit failure, refreshes on success a
       retry.click();
       retry.click();
     });
-    expect(retry.textContent).toBe('安装中…');
+    expect(retry.textContent).toBe('安装');
     expect(retry.getAttribute('aria-disabled')).toBe('true');
     const otherInstall = button(panel, '安装 Second Skill（third/repo）');
     expect(otherInstall.getAttribute('aria-disabled')).toBe('true');
@@ -435,7 +435,7 @@ test('only an installed Skill can be confirmed for uninstall, and closing its de
     expect(calls).toHaveLength(2);
     expect(calls[1]?.selection.skillVersion).toBe('c'.repeat(64));
     expect(dialog()).toBeNull();
-    expect(button(panel, '正在卸载…').disabled).toBe(true);
+    expect(button(panel, '卸载').disabled).toBe(true);
     await act(async () => editorControl.current!.close());
     await openDetail(host, 'computer-use');
     await act(async () => finishUninstall());
@@ -738,9 +738,7 @@ test('Skills DOM publishes all fixed-revision pages with useful details and no i
       });
     });
     await render(bridge);
-    expect(host.querySelector('.provider-directory-heading span:last-child')?.textContent).toBe(
-      '303',
-    );
+    expect(host.textContent).not.toContain('已发现的 Skills');
     for (const hidden of ['已完整读取', '工作区：', '可信配置来源', '状态不授予执行权限'])
       expect(host.textContent).not.toContain(hidden);
     expect(host.querySelectorAll('li')).toHaveLength(303);

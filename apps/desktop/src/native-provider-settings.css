@@ -173,28 +173,6 @@
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-directory {
   min-width: 0;
 }
-.kite-client
-  .desktop-settings
-  :is(.provider-settings, .catalogue-settings)
-  .provider-directory-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 400;
-}
-.kite-client
-  .desktop-settings
-  :is(.provider-settings, .catalogue-settings)
-  .provider-directory-heading
-  span:last-child {
-  padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  font-size: 11px;
-}
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-mark {
   display: inline-flex;
   align-items: center;
@@ -702,10 +680,6 @@
 /* Skills and MCP reuse the provider page, list, field and right-rail primitives. */
 .kite-client .desktop-settings .catalogue-settings .catalogue-section {
   margin-bottom: 28px;
-}
-.kite-client .desktop-settings .catalogue-settings .provider-directory-heading h3 {
-  margin: 0;
-  font: inherit;
 }
 .kite-client .desktop-settings .catalogue-settings .provider-instance-info h4 {
   margin: 0;

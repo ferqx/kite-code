@@ -16,6 +16,7 @@ import {
 import { Input } from './components/ui/input';
 import { PillSelectTrigger } from './components/ui/pill-select-trigger';
 import { TimePicker } from './components/ui/time-picker';
+import { useErrorFeedback } from './error-feedback';
 import {
   ModelEffortSelector,
   type ModelEffortSelectorProps,
@@ -118,6 +119,7 @@ export function ScheduledTaskEditor({
   const [pending, setPending] = useState(false),
     pendingRef = useRef(false);
   const [error, setError] = useState<string>();
+  const reportError = useErrorFeedback();
   const modelSelection: ModelEffortSelectorProps = {
     model: selectedModel,
     models: props.models ?? [],
@@ -167,6 +169,7 @@ export function ScheduledTaskEditor({
       onSubmit={async (event) => {
         event.preventDefault();
         if (!valid || !save || pendingRef.current) return;
+        const form = event.currentTarget;
         pendingRef.current = true;
         setPending(true);
         setError(undefined);
@@ -174,7 +177,10 @@ export function ScheduledTaskEditor({
           await save();
           onClose();
         } catch (failure) {
-          setError(scheduledTaskError(failure));
+          if (!form.isConnected) return;
+          const message = scheduledTaskError(failure);
+          if (reportError) reportError(`保存失败：${message}`);
+          else setError(message);
         } finally {
           pendingRef.current = false;
           setPending(false);
@@ -323,7 +329,7 @@ export function ScheduledTaskEditor({
           取消
         </Button>
         <Button type="submit" className="primary" disabled={!valid || !save || pending}>
-          {pending ? '正在保存…' : task ? '保存' : '创建'}
+          {task ? '保存' : '创建'}
         </Button>
       </footer>
     </form>

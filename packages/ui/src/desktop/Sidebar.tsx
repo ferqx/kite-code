@@ -11,7 +11,6 @@ import {
   MoreHorizontalIcon,
   PencilEdit02Icon,
   Search01Icon,
-  UserCircleIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
@@ -29,18 +28,15 @@ import { Badge } from './components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Spinner } from './components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
 import { SessionSearch, type SessionSearchProps } from './SessionSearch';
+import { SettingsNavigationIcon } from './SettingsNavigationIcon';
 import {
   SidebarNavigationAction,
   SidebarNavigationButton,
@@ -505,10 +501,6 @@ export interface PageActions {
   workbench?: () => void;
   scheduledTasks?: () => void;
   settings?: () => void;
-  theme?: {
-    value: 'dark' | 'light' | 'system';
-    onChange: (value: 'dark' | 'light' | 'system') => void;
-  };
   connection?: { label: string; run: () => void };
   openFile?: (path: string) => void;
 }
@@ -717,8 +709,8 @@ export function Sidebar({
           </div>
         </ScrollArea>
       </TooltipProvider>
-      <div className="sidebar-utilities">
-        {(connectionLabel || actions.connection) && (
+      {(connectionLabel || actions.connection) && (
+        <div className="sidebar-utilities">
           <div className="connection">
             {connectionLabel && <span>{connectionLabel}</span>}
             {actions.connection && (
@@ -727,46 +719,20 @@ export function Sidebar({
               </Button>
             )}
           </div>
-        )}
-        {(actions.settings || actions.theme) && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="profile-card" aria-label="用户菜单">
-                <HugeiconsIcon className="profile-avatar" icon={UserCircleIcon} />
-                <span>
-                  <strong>个人工作区</strong>
-                </span>
-                <HugeiconsIcon icon={MoreHorizontalIcon} aria-label="更多操作" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" className="sidebar-menu">
-              {actions.settings && (
-                <DropdownMenuGroup>
-                  <DropdownMenuItem onSelect={actions.settings}>设置</DropdownMenuItem>
-                </DropdownMenuGroup>
-              )}
-              {actions.settings && actions.theme && <DropdownMenuSeparator />}
-              {actions.theme && (
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel className="sidebar-menu-label">主题</DropdownMenuLabel>
-                  <DropdownMenuRadioGroup
-                    aria-label="主题"
-                    value={actions.theme.value}
-                    onValueChange={(value) => {
-                      if (value === 'dark' || value === 'light' || value === 'system')
-                        actions.theme?.onChange(value);
-                    }}
-                  >
-                    <DropdownMenuRadioItem value="dark">暗</DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="light">亮</DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="system">跟随系统</DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuGroup>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
+        </div>
+      )}
+      {actions.settings && (
+        <div className="sidebar-settings-footer">
+          <SidebarNavigationAction
+            className="settings-navigation"
+            aria-label="打开设置"
+            onClick={actions.settings}
+            icon={<SettingsNavigationIcon name="general" />}
+          >
+            设置
+          </SidebarNavigationAction>
+        </div>
+      )}
     </>
   );
 }

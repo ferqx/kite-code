@@ -17,8 +17,7 @@ export async function openNativeSettingsPage(
   const warm = settingsPage(application);
   if (warm && (await warm.getByRole('dialog', { name: '设置', exact: true }).isVisible()))
     return warm;
-  await root.getByRole('button', { name: '用户菜单', exact: true }).click();
-  await root.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await root.getByRole('button', { name: '打开设置', exact: true }).click();
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     const page = settingsPage(application);

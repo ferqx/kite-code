@@ -407,7 +407,13 @@ test('a missing scheduled result keeps the task page and exposes the navigation 
     await f.click('定时任务');
     await f.click('打开会话');
     expect(f.host.querySelector('.scheduled-tasks-page')).not.toBeNull();
-    expect(f.host.body.textContent).toContain('session_missing');
+    expect(f.host.querySelector('.native-toast')?.textContent).toContain(
+      '暂时无法打开这次运行的会话，请重试。',
+    );
+    expect(f.host.querySelector('.scheduled-card [role="alert"]')).toBeNull();
+    await f.click('关闭提示');
+    expect(f.host.querySelector('.native-toast')).toBeNull();
+    expect(f.button('打开会话')?.disabled).toBe(false);
     expect(
       f.calls.filter((call) => call.method === 'select' && call.sessionId === 'missing'),
     ).toHaveLength(1);

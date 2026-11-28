@@ -38,7 +38,13 @@ export function NativeSettingsSelect({
       <SelectTrigger {...props} ref={triggerRef}>
         <SelectValue>{options.find((option) => option.value === value)?.label}</SelectValue>
       </SelectTrigger>
-      <SelectContent container={container}>
+      <SelectContent
+        align="end"
+        collisionBoundary={container ?? undefined}
+        collisionPadding={8}
+        container={container}
+        className="native-settings-select-content"
+      >
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
             {option.label}

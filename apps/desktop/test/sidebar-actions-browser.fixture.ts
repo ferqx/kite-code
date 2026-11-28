@@ -644,7 +644,7 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       await assertStableDialogOpening(rename, { initial: 'Session B', final: 'Renamed B' });
       await title.press('Enter');
       await pending('session-mutation');
-      await rename.getByRole('button', { name: '保存中…' }).waitFor();
+      await expect(rename.getByRole('button', { name: '保存', exact: true })).toBeDisabled();
       assert.equal(await rowElement('Session B').count(), 1);
       await page.keyboard.press('Escape');
       assert.equal(await rename.isVisible(), true);
@@ -754,6 +754,34 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       assert.equal(await title.inputValue(), 'Discard while disconnected');
       await page.keyboard.press('Escape');
       assert.equal(await editor.inputValue(), 'Keep this draft');
+
+      await open('Session A', '重命名');
+      await title.fill('Renamed A');
+      await expect(save).toBeEnabled();
+      await page.evaluate(() => {
+        const bridge = window.sessionShellFixture.bridge;
+        const original = bridge.request.bind(bridge);
+        bridge.request = async (request) => {
+          if (request.method !== 'session.directory.submit') return original(request);
+          bridge.request = original;
+          await new Promise<void>((resolve) => Reflect.set(window, 'rejectSessionRename', resolve));
+          throw Error('session_observation_changed');
+        };
+      });
+      await title.press('Enter');
+      await expect(save).toBeDisabled();
+      const renameFailure = rename.locator('.native-toast');
+      await expect(renameFailure).toHaveCount(0);
+      await page.evaluate(() => Reflect.get(window, 'rejectSessionRename')());
+      await expect(renameFailure).toContainText('会话状态已变化，请重新核对。');
+      await expect(title).toBeFocused();
+      await expect(title).toHaveValue('Renamed A');
+      await renameFailure.getByRole('button', { name: '关闭提示' }).click();
+      await expect(renameFailure).toHaveCount(0);
+      await rename.getByRole('button', { name: '重新核对' }).click();
+      await expect(save).toBeEnabled();
+      await expect(title).toHaveValue('Renamed A');
+      await page.keyboard.press('Escape');
 
       await page.evaluate(() => window.sessionShellFixture.loseNextSessionReceipt());
       await open('Session A', '重命名');
@@ -1088,13 +1116,17 @@ async function verifyWorkspaceName(page: Page, url: string, artifact: string, th
   const name = '项目显示名';
   await input.fill(name);
   await dialog.getByRole('button', { name: '保存', exact: true }).click();
-  await expect(dialog.getByRole('button', { name: '保存中…', exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: '保存', exact: true })).toBeDisabled();
   await expect(row).toHaveText('Workspace');
   await page.evaluate(() => Reflect.get(window, 'settleRename')());
-  await expect(dialog.getByRole('alert')).toHaveText('项目名称保存失败，请重试。');
+  const failureToast = dialog.locator('.native-toast');
+  await expect(failureToast).toContainText('项目名称保存失败，请重试。');
+  await expect(input).not.toHaveAttribute('aria-invalid', 'true');
   await expect(input).toHaveValue(name);
   await expect(row).toHaveText('Workspace');
   await page.screenshot({ path: path.join(artifact, `sidebar-${theme}-rename-retry.png`) });
+  await failureToast.getByRole('button', { name: '关闭提示' }).click();
+  await expect(failureToast).toHaveCount(0);
 
   await dialog.getByRole('button', { name: '保存', exact: true }).click();
   await expect(dialog).toHaveCount(0);
@@ -1582,8 +1614,7 @@ export async function verifySidebarActions(browser: Browser, url: string, artifa
       await expectCenteredNavigation(
         page.locator('.primary-navigation .sidebar-navigation-action'),
       );
-      await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-      await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+      await page.getByRole('button', { name: '打开设置', exact: true }).click();
       const settingsLabels = page.locator(
         '.native-settings-rail-heading, .native-settings-rail nav button > span',
       );

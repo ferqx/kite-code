@@ -705,8 +705,8 @@ function NativeDesktopContent({
   const errorPresentationScope = JSON.stringify([
     state?.generation ?? generation.current,
     directory?.storeId,
-    state?.selection?.session.id,
-    viewIntent.current,
+    scheduledTasksView ? undefined : state?.selection?.session.id,
+    scheduledTasksView ? undefined : viewIntent.current,
     pageIntent.current,
     settingsOpen
       ? 'settings'
@@ -721,6 +721,7 @@ function NativeDesktopContent({
     report: showOperationMessage,
     dismiss: dismissOperationMessage,
   } = useNativeErrorFeedback(errorPresentationScope);
+  const sessionDialogFeedback = useNativeErrorFeedback(errorPresentationScope);
   const {
     message: inputErrorMessage,
     report: showInputError,
@@ -3449,6 +3450,7 @@ function NativeDesktopContent({
 
   function closeSessionDialog() {
     sessionDialogTarget.current = undefined;
+    sessionDialogFeedback.report();
     setSessionDialog(undefined);
   }
   useEffect(() => {
@@ -3462,13 +3464,16 @@ function NativeDesktopContent({
     } else if (target && directory?.unavailable && !sessionMutationFlight.current) {
       sessionDialogTarget.current = { ...target };
       setSessionDialog(
-        (dialog) => dialog && { ...dialog, facts: undefined, error: '请重新核对会话。' },
+        (dialog) => dialog && { ...dialog, facts: undefined, needsObservation: true },
       );
     }
   }, [state?.generation, directory?.storeId, directory?.unavailable]);
 
   async function observeDirectorySession(target: DirectorySessionTarget) {
-    setSessionDialog((dialog) => dialog && { ...dialog, facts: undefined, error: undefined });
+    sessionDialogFeedback.report();
+    setSessionDialog(
+      (dialog) => dialog && { ...dialog, facts: undefined, needsObservation: false },
+    );
     try {
       const facts = await bridge.request({
         method: 'session.directory.observe',
@@ -3488,16 +3493,12 @@ function NativeDesktopContent({
         throw Error('session_scope_mismatch');
       setSessionDialog((dialog) => dialog && { ...dialog, label: facts.session.title, facts });
     } catch (cause) {
-      if (isCurrentSessionDialog(target))
-        setSessionDialog(
-          (dialog) =>
-            dialog && {
-              ...dialog,
-              error: directorySessionError(
-                (cause as { code?: string })?.code ?? (cause as Error)?.message,
-              ),
-            },
+      if (isCurrentSessionDialog(target)) {
+        setSessionDialog((dialog) => dialog && { ...dialog, needsObservation: true });
+        sessionDialogFeedback.report(
+          directorySessionError((cause as { code?: string })?.code ?? (cause as Error)?.message),
         );
+      }
     }
   }
 
@@ -3567,9 +3568,8 @@ function NativeDesktopContent({
         throw Error('session_result_unavailable');
       const { submission } = result;
       if (submission.phase === 'failed') {
-        setSessionDialog(
-          (dialog) => dialog && { ...dialog, error: directorySessionError(submission.error) },
-        );
+        setSessionDialog((dialog) => dialog && { ...dialog, needsObservation: true });
+        sessionDialogFeedback.report(directorySessionError(submission.error));
       } else {
         closeSessionDialog();
         showSessionMutationResult(submission);
@@ -3577,7 +3577,8 @@ function NativeDesktopContent({
     } catch (cause) {
       if (!isCurrentSessionDialog(target)) return;
       const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
-      setSessionDialog((dialog) => dialog && { ...dialog, error: directorySessionError(code) });
+      setSessionDialog((dialog) => dialog && { ...dialog, needsObservation: true });
+      sessionDialogFeedback.report(directorySessionError(code));
     } finally {
       await refresh().catch(() => {});
       sessionMutationFlight.current = false;
@@ -6528,7 +6529,13 @@ function NativeDesktopContent({
     active: scheduledTasksView,
     revision: settingsRevision,
     workspaces: loadedWorkspaces,
-    onOpen: (sessionId) => select(sessionId, true, true),
+    onOpen: async (sessionId) => {
+      try {
+        await select(sessionId, true, true);
+      } catch {
+        throw Error('scheduled_run_session_unavailable');
+      }
+    },
   });
   const renderNativeAttachments: NonNullable<SessionPageProps['renderMessageAttachments']> = (
     model,
@@ -7758,7 +7765,6 @@ function NativeDesktopContent({
           void report(() => lookupWorkspaceRemoval(commandId), true, '查询移除结果'),
         settings: () => setSettingsOpen(true),
         scheduledTasks: openScheduledTasks,
-        theme,
         connection: diagnostics
           ? { label: '重新读取目录', run: () => void report(readDirectory) }
           : undefined,
@@ -8610,6 +8616,10 @@ function NativeDesktopContent({
         <NativeDirectorySessionDialog
           dialog={sessionDialog}
           pending={sessionMutationPending}
+          toast={{
+            message: sessionDialogFeedback.message,
+            onDismiss: sessionDialogFeedback.dismiss,
+          }}
           observeAvailable={!!directory && !directory.unavailable}
           onClose={closeSessionDialog}
           returnFocus={() => {

@@ -350,8 +350,7 @@ async function verifyMarkdownEdges(theme: 'light' | 'dark', width: number) {
       path: path.join(artifact, `${theme}-${width}-sidebar-alignment.png`),
     });
 
-    await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-    const settings = page.getByRole('menuitem', { name: '设置', exact: true });
+    const settings = page.getByRole('button', { name: '打开设置', exact: true });
     assert.equal(await settings.evaluate((node) => getComputedStyle(node).fontFamily), sans);
     await settings.click();
     const settingsHeading = page.locator('.desktop-settings-dialog .settings-page-heading').first();
