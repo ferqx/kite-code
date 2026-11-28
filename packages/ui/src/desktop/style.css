@@ -5975,9 +5975,9 @@ body {
     transform: translateX(calc(100% + 16px));
   }
 }
-.kite-client :is(.environment-information-toggle, .session-tabs-toggle)[aria-expanded="true"],
+.kite-client .environment-information-toggle[aria-expanded="true"],
 .kite-client
-  :is(.environment-information-toggle, .session-tabs-toggle)[aria-expanded="true"]:hover:is(
+  .environment-information-toggle[aria-expanded="true"]:hover:is(
     :not(:disabled),
     [data-read-gated="true"]
   ) {

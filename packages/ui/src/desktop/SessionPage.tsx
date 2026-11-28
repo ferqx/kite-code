@@ -1,11 +1,4 @@
-import {
-  ListIcon,
-  PanelLeftCloseIcon,
-  PanelLeftIcon,
-  PanelLeftOpenIcon,
-  PanelRightCloseIcon,
-  PanelRightIcon,
-} from '@hugeicons/core-free-icons';
+import { ListIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { ComponentProps, CSSProperties, ReactNode, SyntheticEvent } from 'react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -66,6 +59,28 @@ const NAVIGATION_WIDTH_STORAGE_KEY = 'kite.client.navigationWidth';
 // opening must fit in the right gutter without narrowing or shifting the input.
 const ENVIRONMENT_INFORMATION_MIN_WIDTH = 844 + 2 * 344 + 28;
 const MemoizedSidebar = memo(Sidebar);
+
+function SidebarToggleIcon({ side, expanded }: { side: 'left' | 'right'; expanded: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    >
+      <g transform={side === 'left' ? 'translate(24 0) scale(-1 1)' : undefined}>
+        {expanded ? (
+          <path d="M15 3h2a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4h-2Z" fill="currentColor" stroke="none" />
+        ) : (
+          <path d="M15 3v18" />
+        )}
+      </g>
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+    </svg>
+  );
+}
 
 /** Overlay and classic native scrollbars reserve different amounts of space. */
 function syncConversationScrollbarGutter(element: HTMLElement) {
@@ -1301,16 +1316,7 @@ function SessionPageContent({
       disabled={props.covered}
       onClick={() => setSidebarOpen(!sidebarOpen)}
     >
-      <HugeiconsIcon
-        icon={
-          props.windowNavigationHosts
-            ? PanelLeftIcon
-            : sidebarOpen
-              ? PanelLeftCloseIcon
-              : PanelLeftOpenIcon
-        }
-        aria-hidden="true"
-      />
+      <SidebarToggleIcon side="left" expanded={sidebarOpen} />
     </Button>
   );
   const sidebarPanel = (
@@ -1620,10 +1626,7 @@ function SessionPageContent({
             changeTabsOpen(true);
           }}
         >
-          <HugeiconsIcon
-            icon={tabsExpanded ? PanelRightCloseIcon : PanelRightIcon}
-            aria-hidden="true"
-          />
+          <SidebarToggleIcon side="right" expanded={tabsExpanded} />
         </Button>
       )}
     </header>

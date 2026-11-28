@@ -1019,7 +1019,9 @@ async function verifyWindowsBackdropLayout(page: Page, url: string) {
       await page.mouse.move(600, 300);
       const openAppearance = await tabsAppearance();
       assert.notEqual(openAppearance.icon, closedAppearance.icon);
-      assert.notEqual(openAppearance.background, closedAppearance.background);
+      await expect
+        .poll(async () => (await tabsAppearance()).background)
+        .toBe(closedAppearance.background);
       await tabs.click();
       await expect(tabs).toHaveAttribute('aria-expanded', 'false');
       await expect(tabs).toBeFocused();
