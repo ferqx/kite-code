@@ -161,6 +161,12 @@ export function windowsBashRead(
     // embedded double quotes. Leave those inputs on the ordinary Shell path.
     if (args.some((arg) => arg.includes('"'))) return;
     if (!windowsLiteralArguments(args)) return;
+    if (name === 'date') {
+      const format = args[0] === '-u' || args[0] === '--utc' ? args.slice(1) : args;
+      if (format.length > 1 || (format.length === 1 && !format[0]!.startsWith('+'))) return;
+      const executable = join(dirname(shell), 'date.exe').replaceAll('\\', '/');
+      return { command: [quote(executable), ...args.map(quote)].join(' ') };
+    }
     if (git && (name === 'git' || name === 'git.exe')) {
       const query = windowsGitQuery(args);
       if (query)

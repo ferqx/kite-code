@@ -265,7 +265,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
   });
   if (job.id !== 'shell.command') throw new AgentError('invalid_shell_job');
   const scopeGuidance = options.windowsNativeGitBash
-    ? ' This command uses ordinary Windows user file and network access without confinement. Use it only when the task permits that scope.'
+    ? ' Eligible Auto calls use restricted workspace execution. Calls that require the installed Git Bash with ordinary Windows user file and network access follow the authorization policy for that scope.'
     : options.permissionsSchema
       ? ' Choose the filesystem request before composing the command. Authorization and host limits determine the effective scope. Before requesting wider access, verify the cause and any prior effects.'
       : '';
@@ -358,13 +358,13 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
               filesystem: {
                 enum: ['workspace_write', 'full_access'],
                 description: options.windowsNativeGitBash
-                  ? 'The installed Git Bash uses normal user file access. A requested workspace scope is not a sandbox.'
+                  ? 'Use "workspace_write" for local workspace commands. Eligible Auto calls with network "none" enforce this write scope. The installed Git Bash uses ordinary user file access when that scope is authorized.'
                   : `Set "full_access" explicitly for commands required by the active skill, including its validation and delivery steps, when the user and task allow it. Use "workspace_write" for ordinary workspace commands and when the task limits you to that scope. Other external writes require task authorization and an explicit "full_access" request.${windowsFilesystemGuidance}`,
               },
               network: {
                 enum: ['none', 'internet'],
                 description: options.windowsNativeGitBash
-                  ? 'Installed Git Bash is not network-isolated. Do not use it for tasks requiring an offline process.'
+                  ? 'Use "none" for local workspace work. Restricted execution uses offline environment hints. Installed Git Bash uses normal user network access when that scope is authorized.'
                   : 'Set "none" for local file work and local named-pipe IPC, including when requesting full_access. Set "internet" for required, authorized network access, including localhost, 127.0.0.1, ::1, LAN and the Internet.',
               },
             }

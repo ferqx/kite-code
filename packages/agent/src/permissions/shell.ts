@@ -29,6 +29,7 @@ import {
 import {
   captureInstalledWindowsGitBashRuntime,
   captureWindowsGitBashRuntime,
+  stageWindowsGitBash,
   windowsGitProgram,
 } from '../jobs/windows-git-bash';
 import {
@@ -239,6 +240,8 @@ export async function inspectShellAssets(
     if (options.shellExecutable !== options.windows.fullShellExecutable)
       throw new AgentError('shell_asset_unavailable');
     paths.push([join(dirname(options.shellExecutable), 'msys-2.0.dll'), true]);
+    if (options.windows.confinedBashCompatibility)
+      paths.push([options.windows.confinedBashCompatibility, true]);
   } else if (options.windows && options.windows.kind !== 'powershell')
     paths.push(
       [options.windows.fullShellExecutable, true],
@@ -602,6 +605,8 @@ export async function createShellConfiguration(input: {
         ? await captureInstalledWindowsGitBashRuntime(shell.path, input.signal)
         : undefined;
     const nativeScope = { filesystem: 'full_access', network: 'internet' } as const;
+    const confinedBashCompatibility =
+      windows?.kind === 'native-git-bash' ? windows.confinedBashCompatibility : undefined;
     const bashRuntime =
       native ??
       (windows && windows.kind !== 'powershell'
@@ -725,6 +730,8 @@ export async function createShellConfiguration(input: {
     function windowsRead(
       source: string,
       classified: Awaited<ReturnType<typeof commandPolicy.classify>>,
+      bashShell = shell!.path,
+      bashGit = git,
     ): WindowsRead | undefined {
       if (!options.windows || classified.hardDenied) return;
       const ps = classified.powerShell;
@@ -733,8 +740,20 @@ export async function createShellConfiguration(input: {
           ? git && { command: source, git: { ...git, argv: ps.gitQuery } }
           : { command: source, ...(ps.pinRipgrep ? { pinRipgrep: ps.pinRipgrep } : {}) };
       const read =
-        classified.windowsRead && windowsBashRead(classified.windowsRead, shell!.path, git?.path);
-      return read && { command: read.command, ...(read.gitQuery && git ? { git } : {}) };
+        classified.windowsRead && windowsBashRead(classified.windowsRead, bashShell, bashGit?.path);
+      return (
+        read && { command: read.command, ...(read.gitQuery && bashGit ? { git: bashGit } : {}) }
+      );
+    }
+    function defaultShellScope(scope: unknown) {
+      return (
+        !!scope &&
+        typeof scope === 'object' &&
+        'filesystem' in scope &&
+        scope.filesystem === 'workspace_write' &&
+        'network' in scope &&
+        scope.network === 'none'
+      );
     }
     function digestShellCommand(
       request: Pick<AuthorizationRequest, 'kind' | 'definitionId' | 'definitionVersion'>,
@@ -825,9 +844,13 @@ export async function createShellConfiguration(input: {
       string,
       { filesystem: 'workspace_write' | 'full_access'; network: 'none' }
     >();
-    const executionScope = (context: JobContext) => {
+    const executionScope = (context: JobContext, confinedNative = false) => {
       const requested = workerScopes.get(context.executionId);
-      const accepted = hostExecutionScope(context, 'shell.command', !!native && !requested);
+      const accepted = hostExecutionScope(
+        context,
+        'shell.command',
+        !!native && !requested && !confinedNative,
+      );
       return requested
         ? {
             filesystem:
@@ -863,27 +886,35 @@ export async function createShellConfiguration(input: {
         ? { linux: { bubblewrapPath: bubblewrap.path, initExecutable: supervisor.path } }
         : {}),
     };
-    const makeJob = async (directory = cwd, jobSignal?: AbortSignal) =>
+    type StagedBash = Awaited<ReturnType<typeof stageWindowsGitBash>>;
+    let stagedRuntime: Promise<StagedBash> | undefined;
+    const makeJob = async (directory = cwd, jobSignal?: AbortSignal, staged?: StagedBash) =>
       options.platform === 'win32' && options.windows && host
         ? await createWindowsShellJob(
             {
               ...jobOptions,
               ...options.windows,
-              ...(native
+              ...(staged
                 ? {
-                    expectedNativeRuntimeIdentity: native.identity,
-                    nativeWorktreePowerShell: nativeWorker,
+                    kind: 'bash' as const,
+                    shellExecutable: staged.shell,
+                    fullShellExecutable: staged.fullShell,
                   }
-                : {}),
+                : native
+                  ? {
+                      expectedNativeRuntimeIdentity: native.identity,
+                      nativeWorktreePowerShell: nativeWorker,
+                    }
+                  : {}),
               cwd: directory,
               workspaceRoot: cwd,
               controlBase: host.controlBase,
               readOnlyLaunch: (context) => readOnlyWindowsJobs.get(context.executionId),
               executionScope: (context) => {
-                const scope = executionScope(context);
-                return scope.filesystem === 'workspace_write' &&
-                  scope.network === 'none' &&
-                  readOnlyWindowsJobs.has(context.executionId)
+                const scope = executionScope(context, !!staged);
+                if (staged && !defaultShellScope(scope))
+                  throw new AgentError('shell_dispatch_scope_unavailable');
+                return defaultShellScope(scope) && readOnlyWindowsJobs.has(context.executionId)
                   ? { filesystem: 'read_only', network: 'none' }
                   : scope;
               },
@@ -1030,8 +1061,6 @@ export async function createShellConfiguration(input: {
             const parsed = parseShellCommandInput(value, 'job', !!host);
             if (!parsed) throw new AgentError('invalid_shell_arguments');
             const directory = await executionDirectory(parsed.workdir);
-            const selectedJob =
-              parsed.workdir === undefined ? job : await makeJob(directory.path, context.signal);
             const classified = await commandPolicy.classify(
               command,
               context.signal,
@@ -1041,11 +1070,19 @@ export async function createShellConfiguration(input: {
               const denial = powerShellScopeDenial(classified.powerShell, executionScope(context));
               if (denial) throw new AgentError(denial);
             }
-            const scope = executionScope(context);
-            const read =
-              scope.filesystem === 'workspace_write' && scope.network === 'none'
-                ? windowsRead(command, classified)
-                : undefined;
+            const scope = executionScope(context, !!native && !!confinedBashCompatibility);
+            const confinedNative =
+              native &&
+              confinedBashCompatibility &&
+              defaultShellScope(scope) &&
+              acceptedScopeLeaves(context, 'shell.command').some(
+                (leaf) =>
+                  leaf.mode === 'auto' &&
+                  !leaf.nativeUserProcess &&
+                  defaultShellScope(leaf.executionScope),
+              );
+            if (native && !confinedNative) hostExecutionScope(context, 'shell.command', true);
+            const read = defaultShellScope(scope) ? windowsRead(command, classified) : undefined;
             const fullShell = options.windows?.fullShellExecutable;
             const searchShell =
               fullShell && scope.filesystem === 'full_access' ? fullShell : shell.path;
@@ -1093,11 +1130,61 @@ export async function createShellConfiguration(input: {
             }
 
             context.signal.throwIfAborted();
+            let staged: StagedBash | undefined;
+            let launch = read;
+            if (native && confinedNative) {
+              if (!confinedBashCompatibility || !windows)
+                throw new AgentError('windows_shell_asset_unavailable');
+              stagedRuntime ??= stageWindowsGitBash(
+                windows.stateRoot,
+                confinedBashCompatibility,
+                shell.path,
+              );
+              const preparing = stagedRuntime;
+              try {
+                staged = await preparing;
+              } catch (error) {
+                if (stagedRuntime === preparing) stagedRuntime = undefined;
+                throw error;
+              }
+              native.verifyStagedSources(staged.sourceDigests);
+              const compatibility = assets.find(({ path }) => path === confinedBashCompatibility);
+              if (
+                !compatibility ||
+                staged.sourceDigests.get(compatibility.path) !== compatibility.digest
+              )
+                throw new AgentError('shell_asset_changed');
+              await native.verify(true, context.signal);
+              const pinnedGit = read?.git
+                ? await asset(
+                    (
+                      await captureWindowsGitBashRuntime(
+                        staged.shell,
+                        staged.fullShell,
+                        context.signal,
+                      )
+                    ).git,
+                    true,
+                    context.signal,
+                  )
+                : undefined;
+              if (pinnedGit && pinnedGit.digest !== read?.git?.digest)
+                throw new AgentError('shell_asset_changed');
+              if (read) {
+                launch = windowsRead(command, classified, staged.shell, pinnedGit);
+                if (!launch) throw new AgentError('shell_asset_changed');
+              }
+            }
+            const selectedJob =
+              staged || parsed.workdir !== undefined
+                ? await makeJob(directory.path, context.signal, staged)
+                : job;
+            context.signal.throwIfAborted();
             dispatched = true;
-            if (read) readOnlyWindowsJobs.set(context.executionId, read);
+            if (launch) readOnlyWindowsJobs.set(context.executionId, launch);
             try {
               const handle = await selectedJob.start(
-                { command: read?.command ?? search ?? command },
+                { command: launch?.command ?? (staged ? command : (search ?? command)) },
                 context,
               );
               handleOwners.set(handle, selectedJob);
@@ -1227,9 +1314,15 @@ export async function createShellConfiguration(input: {
                 cwd: directory.path,
                 binding: { ...riskOptions.binding, cwd: directory },
               });
+        const confinedNative =
+          native &&
+          confinedBashCompatibility &&
+          host &&
+          kind === 'job' &&
+          defaultShellScope(value.executionScope);
         const prepared = await preparer.prepare(
           value.command,
-          native ? nativeScope : value.executionScope,
+          native && !confinedNative ? nativeScope : value.executionScope,
           request.signal,
         );
         request.signal.throwIfAborted();
@@ -1383,6 +1476,18 @@ export async function createShellConfiguration(input: {
             ? { filesystem: 'full_access', network: 'internet' }
             : value.executionScope;
         const denial = ps ? powerShellScopeDenial(ps, scope) : classified.hardDenied;
+        const verifiedRead =
+          defaultShellScope(value.executionScope) &&
+          (options.windows
+            ? windowsRead(value.command, classified)
+            : readOnlySearchCommand(classified, shell.path));
+        const nativeAutoConfined =
+          native &&
+          confinedBashCompatibility &&
+          host &&
+          request.kind === 'job' &&
+          policy?.mode === 'auto' &&
+          defaultShellScope(value.executionScope);
         return {
           commandDigest: digestShellCommand(request, value, directory, classified),
           ...(host &&
@@ -1392,13 +1497,7 @@ export async function createShellConfiguration(input: {
           value.cancellation !== 'detached'
             ? { schedulesPowerShellJob: true as const }
             : {}),
-          ...((options.windows
-            ? windowsRead(value.command, classified)
-            : readOnlySearchCommand(classified, shell.path)) &&
-          value.executionScope.filesystem === 'workspace_write' &&
-          value.executionScope.network === 'none'
-            ? { safeRead: true, effects: ['read'] as const }
-            : {}),
+          ...(verifiedRead ? { safeRead: true, effects: ['read'] as const } : {}),
           ...(ps && !ps.readOnly
             ? {
                 effects: [
@@ -1432,15 +1531,18 @@ export async function createShellConfiguration(input: {
               }),
             )
             .digest('hex'),
-          ...(native
-            ? {
-                windowsNativeUserProcess: true as const,
-                safeRead: false,
-                effects: ['process', 'external', 'network'] as const,
-                executionScope: nativeScope,
-                autoTimeoutScope: 'stop' as const,
-              }
-            : {}),
+          // Auto reviews the dispatching Job before either restricted read or workspace execution.
+          ...(nativeAutoConfined
+            ? { safeRead: false, autoTimeoutScope: 'stop' as const }
+            : native
+              ? {
+                  windowsNativeUserProcess: true as const,
+                  safeRead: false,
+                  effects: ['process', 'external', 'network'] as const,
+                  executionScope: nativeScope,
+                  autoTimeoutScope: 'stop' as const,
+                }
+              : {}),
           hardAllowed: denial === null,
           ...(denial ? { denialReason: ps ? denial : 'shell_command_hard_denied' } : {}),
         };

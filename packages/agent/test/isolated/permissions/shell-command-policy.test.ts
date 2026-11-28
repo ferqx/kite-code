@@ -338,7 +338,16 @@ test('Windows Bash read path excludes mutations, external helpers and altered ar
   };
   expect(await read('rg -n needle input.txt | head -40')).toBeDefined();
   expect(await read('git diff --stat')).toMatchObject({ gitQuery: true });
+  expect(await read('date +%A')).toEqual({ command: "'C:/fixture/date.exe' '+%A'" });
+  expect(await read("date -u '+%Y-%m-%d %H:%M'")).toEqual({
+    command: "'C:/fixture/date.exe' '-u' '+%Y-%m-%d %H:%M'",
+  });
   for (const command of [
+    'date +%A > report.txt',
+    'date --set=2026-11-28',
+    'date 11281742',
+    'date +%A -s tomorrow',
+    'date "$(cat date.txt)"',
     'git diff --output=report.txt',
     'git diff --ext-diff',
     'git show --textconv HEAD:input.txt',

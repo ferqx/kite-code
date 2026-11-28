@@ -644,7 +644,7 @@ Plan 文件编辑委派到 `planning.write` 后，FileCheckpoint 只从准确父
 
 ## 默认 Shell 装配
 
-Windows 的真实 Service 按会话绑定 PowerShell 或 Git Bash。Auto 对可核实的只读调用直接派发，其他通过准入的 Shell 调用走同一风险审核，高风险才出现原人工卡。 [权限 owner](../../packages/agent/src/permissions/README.md) · [两个后端的原生 Service 回归](test/isolated/windows-shell-auto.test.ts)
+Windows 的真实 Service 按会话绑定 PowerShell 或 Git Bash。Auto 下 PowerShell 可直接派发已核实的只读调用，Git Shell 的默认工作区调用由实际 Job 审核后走受限 Git Bash，核实的只读命令使用只读文件范围。高风险调用显示原人工卡，原装 Git Bash 调用仍按实际进程范围确认。 [权限 owner](../../packages/agent/src/permissions/README.md) · [两个后端的原生 Service 回归](test/isolated/windows-shell-auto.test.ts)
 
 `git.worktree@1` 通过同一 builtin.shell 装配，默认目录新增模型名 `git_worktree`。只选该工具时仍提供内部 Shell Job 和封存资产，不开放模型 Shell。[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)定义三个 action 和安全/恢复契约；[configuration](src/configuration.ts)从既有 policyRuntime 注入独立 worktreeHost 闭包，不把回调放入结构化克隆的 options。删除首次派发前，[根查询](src/worktree-host.ts)完整分页读取同 Store Workspace Directory、逐条核 getWorkspace 和物理路径，再核最终 cursor/高水位；任何读失败、漂移或不能解释的根都拒绝。登记根不依赖活跃状态。当前 Tool 的 Run safety 由既有 Context读取且必须准确排除自身，不能以整个活动 Run 的 quiescent 代替。
 

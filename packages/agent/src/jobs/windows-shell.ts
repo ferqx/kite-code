@@ -137,7 +137,13 @@ const canonical = (value: unknown): string =>
       : JSON.stringify(value);
 
 export type WindowsShellBackend =
-  | { kind?: 'bash' | 'native-git-bash'; fullShellExecutable: string; bashVersion?: string }
+  | { kind?: 'bash'; fullShellExecutable: string; bashVersion?: string }
+  | {
+      kind: 'native-git-bash';
+      fullShellExecutable: string;
+      bashVersion?: string;
+      confinedBashCompatibility?: string;
+    }
   | {
       kind: 'powershell';
       powerShell: WindowsPowerShell;
@@ -196,6 +202,7 @@ export async function windowsShellAssets(
         kind: 'native-git-bash',
         stateRoot,
         fullShellExecutable: bash.fullShell,
+        confinedBashCompatibility: join(root, 'ktipc.dll'),
         // No process may run merely because Settings inspected this installation.
       },
     };

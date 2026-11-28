@@ -21,13 +21,14 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
   usage: { inputTokens: 1, outputTokens: 1 },
 };
 test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
-  'original Bash verifies fresh user-process approvals before effects in each permission mode',
+  'Git Shell Auto confines ordinary workspace effects and keeps required approvals on the exact Job',
   async () => {
     const root = temporaryDirectory('kite-bash-consent-');
     const cwd = join(root, 'workspace'),
       control = join(root, 'control'),
       stateRoot = join(root, 'state');
-    for (const path of [cwd, control, stateRoot]) mkdirSync(path);
+    for (const path of [cwd, control]) mkdirSync(path);
+    privateDirectory(stateRoot);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
     privateDirectory(profile.profilePath);
     const cfg = join(profile.profilePath, 'config.jsonc');
@@ -71,7 +72,15 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
         ),
         bunExecutable: process.execPath,
         shellExecutable: shell,
-        windows: { kind: 'native-git-bash', stateRoot, fullShellExecutable: shell },
+        windows: {
+          kind: 'native-git-bash',
+          stateRoot,
+          fullShellExecutable: shell,
+          confinedBashCompatibility: resolve(
+            import.meta.dir,
+            '../../../../native/windows-msys-compat/target/release/ktipc.dll',
+          ),
+        },
         host: {
           controlBase: control,
           protectedRoots: [],
@@ -84,9 +93,8 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
     const expectedStoreId = (await store.getMetadata()).storeId;
     const locks = createWorkspaceSerialLocks(profile);
     host.bindWorkspaceSerialLocks?.(locks);
-    let timeout = false,
-      businessNext = false,
-      risk: 'ordinary' | 'critical' = 'ordinary',
+    let businessNext = false,
+      risk: 'ordinary' | 'high' | 'critical' = 'ordinary',
       checks = 0,
       command = '';
     const business: ModelAdapter = {
@@ -96,10 +104,10 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
           yield {
             type: 'tool_call',
             id: crypto.randomUUID(),
-            name: 'shell_execute',
+            name: 'exec_command',
             arguments: JSON.stringify({
-              command,
-              ...(timeout ? { execution_timeout_ms: 6500 } : {}),
+              cmd: command,
+              yield_time_ms: 20000,
             }),
           };
           yield { ...finish, reason: 'tool_calls' };
@@ -170,27 +178,37 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
         const actual = () => (existsSync(path) ? readFileSync(path, 'utf8') : '');
         const cases =
           mode === 'full'
-            ? ['approved', 'timeout']
+            ? ['approved', 'cancel']
             : mode === 'auto'
-              ? ['approved', 'denied', 'critical']
+              ? ['read', 'approved', 'high-approved', 'denied', 'outside', 'critical']
               : ['approved', 'denied'];
         for (const [i, choice] of cases.entries()) {
           const before = actual(),
             startChecks = checks,
             id = mode + '-' + i;
           businessNext = true;
-          risk = choice === 'critical' ? 'critical' : 'ordinary';
-          timeout = choice === 'timeout';
-          command = timeout
-            ? 'printf started > deadline-started; sleep 20; printf late > deadline-late'
-            : 'printf x >> ' + file;
+          const highRisk = choice === 'denied' || choice === 'high-approved';
+          risk = choice === 'critical' ? 'critical' : highRisk ? 'high' : 'ordinary';
+          command =
+            choice === 'cancel'
+              ? 'printf started > deadline-started; sleep 20; printf late > deadline-late'
+              : choice === 'read'
+                ? 'date +%A'
+                : choice === 'outside'
+                  ? 'printf outside > ../outside.txt'
+                  : choice === 'high-approved'
+                    ? `printf y >> ${file}`
+                    : choice === 'denied'
+                      ? `date +%A >> ${file}`
+                      : `printf x >> ${file}`;
           await runtime.submitCommand({
             ...identity,
             commandId: id,
             request: { kind: 'run.start', content: 'Run the owned fixture.' },
           });
           const deadline = Date.now() + 25000;
-          let answered = 0,
+          let cancelled = false,
+            answered = 0,
             settled = false;
           while (Date.now() < deadline) {
             const pending = (
@@ -202,28 +220,36 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
               answered++;
               expect(mode).not.toBe('full');
               expect(choice).not.toBe('critical');
+              expect(choice).not.toBe('read');
               expect(item.definitionId).toBe('shell.command');
               const [choiceView] = readApprovalOptions(item.request);
-              expect(structuredClone(item.request)).toMatchObject({
-                input: { command },
-                policy: {
-                  windowsNativeUserProcess: true,
-                  executionScope: { filesystem: 'full_access', network: 'internet' },
-                },
-                options: [
-                  {
-                    kind: 'once',
-                    presentation: {
-                      label: expect.stringContaining('当前 Windows 用户文件和网络（不限工作区）'),
-                      details: [expect.stringContaining('不限于工作区')],
-                    },
+              if (mode === 'auto') {
+                expect(highRisk).toBe(true);
+                expect(structuredClone(item.request)).toMatchObject({
+                  input: { command },
+                  policy: {
+                    executionScope: { filesystem: 'workspace_write', network: 'none' },
                   },
-                ],
-              });
-              expect(choiceView?.presentation.label).toContain(
-                '当前 Windows 用户文件和网络（不限工作区）',
-              );
-              expect(choiceView?.presentation.details[0]).toContain('不限于工作区');
+                });
+                expect(choiceView?.kind).toBe('once');
+              } else {
+                expect(structuredClone(item.request)).toMatchObject({
+                  input: { command },
+                  policy: {
+                    windowsNativeUserProcess: true,
+                    executionScope: { filesystem: 'full_access', network: 'internet' },
+                  },
+                  options: [
+                    {
+                      kind: 'once',
+                      presentation: {
+                        label: expect.stringContaining('当前 Windows 用户文件和网络（不限工作区）'),
+                        details: [expect.stringContaining('不限于工作区')],
+                      },
+                    },
+                  ],
+                });
+              }
               expect(actual()).toBe(before);
               await runtime.answerInteraction({
                 ...identity,
@@ -232,7 +258,7 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
                 interactionId: item.id,
                 expectedRevision: item.revision,
                 answer:
-                  choice === 'approved'
+                  choice === 'approved' || choice === 'high-approved'
                     ? { kind: 'approval', decision: 'approve', optionId: 'once' }
                     : { kind: 'approval', decision: 'deny' },
               });
@@ -240,6 +266,19 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
             const run = (await store.getView(sessionId)).runs.find(
               (row) => row.originCommandId === id,
             );
+            if (
+              choice === 'cancel' &&
+              run?.isActive &&
+              !cancelled &&
+              existsSync(join(cwd, 'deadline-started'))
+            ) {
+              cancelled = true;
+              await runtime.cancelRun({
+                ...identity,
+                commandId: 'cancel-original-shell',
+                runId: run.id,
+              });
+            }
             if (run && !run.isActive) {
               settled = true;
               break;
@@ -247,15 +286,49 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
             await Bun.sleep(30);
           }
           expect(settled).toBe(true);
-          expect(answered).toBe(mode === 'full' || choice === 'critical' ? 0 : 1);
-          expect(actual()).toBe(before + (choice === 'approved' ? 'x' : ''));
+          expect(answered).toBe(mode === 'accept_edits' || (mode === 'auto' && highRisk) ? 1 : 0);
+          expect(actual()).toBe(
+            before + (choice === 'approved' ? 'x' : choice === 'high-approved' ? 'y' : ''),
+          );
           if (mode === 'auto') expect(checks - startChecks).toBe(1);
-          if (timeout) {
+          if (choice === 'outside') {
+            const job = (await store.listExecutions(sessionId)).find(
+              (row) => row.rootWorkCommandId === id && row.definitionId === 'shell.command',
+            );
+            expect(job?.result).toMatchObject({
+              outcome: 'failed',
+              details: { cleanupConfirmed: true, processTreeStopped: true },
+            });
+            expect(existsSync(join(root, 'outside.txt'))).toBe(false);
+          }
+          if (choice === 'read') {
+            const job = (await store.listExecutions(sessionId)).find(
+              (row) => row.rootWorkCommandId === id && row.definitionId === 'shell.command',
+            );
+            expect(job?.status, JSON.stringify(job?.result)).toBe('succeeded');
+            expect(job?.result).toMatchObject({
+              details: { exitCode: 0, cleanupConfirmed: true, processTreeStopped: true },
+            });
+            const output = await store.listExecutionOutput({
+              executionId: job!.id,
+              afterSeq: '0',
+              limit: 20,
+            });
+            expect(
+              output.items
+                .filter(({ stream }) => stream === 'stdout')
+                .map(({ content }) => content)
+                .join('')
+                .trim(),
+            ).not.toBe('');
+          }
+          if (choice === 'cancel') {
+            expect(cancelled).toBe(true);
             expect(readFileSync(join(cwd, 'deadline-started'), 'utf8')).toBe('started');
             expect(existsSync(join(cwd, 'deadline-late'))).toBe(false);
             const rows = await store.listExecutions(sessionId);
             const parent = rows.find(
-              (row) => row.originCommandId === id && row.definitionId === 'shell.execute',
+              (row) => row.rootWorkCommandId === id && row.definitionId === 'shell.execute',
             );
             const job = rows.find(
               (row) => row.parentExecutionId === parent?.id && row.definitionId === 'shell.command',
@@ -267,7 +340,7 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
           }
         }
       }
-      expect(existsSync(join(stateRoot, 'runtime'))).toBe(false);
+      expect(existsSync(join(stateRoot, 'runtime'))).toBe(true);
     } finally {
       await runtime.close();
       await store.close();
@@ -284,7 +357,9 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
           (await cold.listInteractions({ expectedStoreId, sessionId, state: 'pending' }))
             .interactions,
         ).toEqual([]);
-        expect(readFileSync(join(cwd, sessionId + '.txt'), 'utf8')).toBe('x');
+        expect(readFileSync(join(cwd, sessionId + '.txt'), 'utf8')).toBe(
+          sessionId === 'auto' ? 'xy' : 'x',
+        );
       }
       expect(existsSync(join(cwd, 'deadline-late'))).toBe(false);
     } finally {

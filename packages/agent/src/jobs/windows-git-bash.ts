@@ -240,16 +240,22 @@ export function windowsGitProgram(executable: string): string {
 }
 
 /** Prepare the private runtime needed by the restricted token. */
-export async function stageWindowsGitBash(stateRoot: string, compatibility: string) {
+export async function stageWindowsGitBash(
+  stateRoot: string,
+  compatibility: string,
+  installedShell?: string,
+) {
   if (process.platform !== 'win32' || process.arch !== 'x64' || !isAbsolute(stateRoot))
     throw Error('windows_shell_unqualified');
-  const git = Bun.which('git');
+  const git = installedShell ?? Bun.which('git');
   if (!git) throw new WindowsGitBashUnavailable();
   const gitExecutable = realpathSync.native(git);
   const discovered = discoverGitInstallation(gitExecutable);
   if (!discovered) throw new WindowsGitBashUnavailable(gitExecutable);
   const { installation, programRoot } = discovered;
   const source = join(installation, 'usr/bin');
+  if (installedShell && installedShell !== join(source, 'bash.exe'))
+    throw Error('windows_git_bash_asset_invalid');
   for (const name of gitBashFiles) {
     const stat = lstatSync(join(source, name));
     if (!stat.isFile() || stat.isSymbolicLink()) throw Error('windows_git_bash_asset_invalid');
@@ -280,21 +286,26 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
     ),
     compatibility,
   ]);
-  const files = Array.from(paths, (path) => {
-    const stat = lstatSync(path);
+  const files = await mapAssetVerification([...paths], async (path, signal) => {
+    const stat = await lstat(path);
     if (!stat.isFile() || stat.isSymbolicLink()) throw Error('windows_git_bash_asset_invalid');
-    const original = readFileSync(path);
-    const sourceSha256 = createHash('sha256').update(original).digest('hex');
+    const identity = await launchIdentityAsync(path, true, signal);
+    if (identity.digest === null) throw Error('windows_git_bash_asset_invalid');
+    let sha256 = identity.digest;
+    if (path.toLowerCase().endsWith('msys-2.0.dll')) {
+      const original = await readFile(identity.canonical, { signal });
+      if (createHash('sha256').update(original).digest('hex') !== identity.digest)
+        throw Error('windows_git_bash_asset_changed');
+      sha256 = createHash('sha256').update(msysCompatibilityImage(original)).digest('hex');
+    }
     return {
-      source: realpathSync.native(path),
+      source: identity.canonical,
       name:
         path === compatibility
           ? compatibilityName
           : relative(installation, path).replaceAll('\\', '/'),
-      sourceSha256,
-      sha256: path.toLowerCase().endsWith('msys-2.0.dll')
-        ? createHash('sha256').update(msysCompatibilityImage(original)).digest('hex')
-        : sourceSha256,
+      sourceSha256: identity.digest,
+      sha256,
     };
   });
   const identity = createHash('sha256').update(JSON.stringify(files)).digest('hex');
@@ -362,6 +373,7 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
       shell: join(runtime, 'usr/bin/bash.exe'),
       fullShell: realpathSync.native(join(source, 'bash.exe')),
       stateRoot,
+      sourceDigests: new Map(files.map(({ source, sourceSha256 }) => [source, sourceSha256])),
     };
   } finally {
     // prepareFiles settles every started operation before this owner is released.
@@ -424,6 +436,10 @@ export async function captureInstalledWindowsGitBashRuntime(shell: string, signa
     git,
     fullGit: git,
     identity,
+    verifyStagedSources(sourceDigests: ReadonlyMap<string, string>) {
+      if (facts.some(({ canonical, digest }) => sourceDigests.get(canonical) !== digest))
+        throw Error('windows_git_bash_asset_changed');
+    },
     async verify(_full: boolean, signal?: AbortSignal) {
       // The verified helper admits bounded batches; retain every original file identity.
       for (let i = 0; i < facts.length; i += 100)

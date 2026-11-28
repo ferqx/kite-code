@@ -182,7 +182,7 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
     const ordinary = authority.extensions
       .flatMap((extension) => extension.tools ?? [])
       .find((tool) => tool.id === 'shell.execute')!;
-    expect(ordinary.description).toContain('ordinary Windows user’s file and network access');
+    expect(ordinary.description).toContain('ordinary Windows user file and network access');
     expect(ordinary.description).not.toContain('Default local named pipes can deny');
     expect(ordinary.description).toContain('Kite stops remaining child processes');
     for (const mode of ['accept_edits', 'auto', 'full'] as const) {

@@ -48,7 +48,7 @@ Ordinary builtin Shell publishes its stable prefix live and buffers a bounded su
 
 `start` 仅在原 runner READY 核验与 GO 写入确认后返回；此前不进入 Core running。失败准入通过 `JobStartError` 交回原 handle，Core 观察原终态并清理，未知清理仍保 handle、资源及 binding，不能丢失后仅保一个无法停止的空引用。已确认零派发的准备失败携带无 handle 的明确事实，Core 保存失败并释放资源。原协议与版本不变。
 
-普通 Windows Git Bash 始终启动从 PATH 中 Git 安装定位的原装 usr/bin/bash.exe。当前批准绑定该安装、解释器、MSYS、Git 和原配套文件的身份；发现选项不执行 Bash，也不生成私有运行时。已接受的实际范围必须是 full_access / internet，且拒绝已提升权限的宿主。沿用 V7 READY/GO、当前用户 token、原生 Job 限额、输出与结果未知语义；这不是文件系统或网络沙箱。
+Windows Git Shell 绑定从 PATH 中 Git 安装定位的原装 usr/bin/bash.exe。原装进程要求 full_access / internet 并拒绝提升权限的宿主。Auto 下，默认工作区范围的调用经实际 Job 授权后，按绑定安装和已核验兼容库准备私有运行时，复核原始资产与副本后以受限令牌派发。普通命令使用工作区写入范围，可核实的读取固定到副本中的程序并使用只读文件范围。沿用原 V7 READY/GO、进程监督、取消和结果语义。准备失败不转原装运行。发现选项不执行 Bash，也不准备副本。
 
 `createWindowsShellJob`、`captureWindowsGitBashRuntime` 的初始捕获和每次派发复核均异步等待。完整文件校验共用进程内8个读取名额，每个原 FD 独占至多1MiB缓冲，读到实际 EOF 并核前后身份、大小与时间，最后复核原路径；不缓存内容证明。SHA 分块之间按8ms／64步预算主动交还事件循环，避免已完成 I/O 的连续微任务继续阻塞其他会话。排队与读取检查点接受原取消信号；失败停止领取新文件、取消兄弟读取，等待已开始 I/O 和原 FD 关闭后才返回。关闭无法确认时保原 FileHandle 及名额，不把它当已释放；进程池和 Shell 状态复用均未引入。[异步校验回归](../../test/isolated/jobs/launch-identity-async.test.ts)核短读、空文件、尾部变更、增长／截断／替换、读取失败、排队／读取中取消、失败批次收尾、关闭未知的全局上限，以及连续完成的读取确实交还事件循环。
 

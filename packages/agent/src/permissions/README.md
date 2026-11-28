@@ -138,7 +138,7 @@ Planning 默认宿主调用 `createBusinessPermissionPolicy`，并由 Planning o
 
 当前回归沿[解析](../../test/isolated/permissions/shell-command-policy.test.ts)核 bundled rg 的安全查询、选项值、hooks 与解压器副作用；[Service Shell](../../../../apps/service/test/isolated/shell-configuration.test.ts)和[检索集成](../../../../apps/service/test/isolated/shell-search-configuration.test.ts)核只读任务的复合查询进入继承的三模式、普通平台保护及新审核超时不派发。该组显式注入的自定义审核器仍按旧合同接收任务上下文并可拒绝实际写入，不代表新默认风险合同核任务授权；后者由上文 risk 回归与[真实模型入口](../../../../tests/e2e/live/model/README.md#审批策略与原生-shell-执行)分别验证。[同名模型](../../../../apps/service/test/isolated/shell-model-identity.test.ts)核能力身份隔离；[指导输入](../../../../apps/service/test/isolated/child-readonly-guidance.test.ts)核角色的实际模型 Source 与冻结。下段2026-11-03早先回归中的角色命令硬拒结果属于替换前行为，不能证明当前角色禁写。[前台](../../test/isolated/tools/shell/foreground.test.ts)的期限与取消语义保持。受控模型及本机效果不扩为真实模型判断、客户端界面或其他平台原生资格。
 
-Windows 使用系统原生安装的 Git Bash，不复制私有运行时。实际 Job 以当前 Windows 用户身份执行，不能将 Shell 范围或只读识别当作操作系统隔离；非完全模式按原生用户进程路径确认。具体范围见下文 Windows 当前实现。
+Windows Git Shell 的原装进程以当前 Windows 用户身份执行并逐次核对实际权限。Auto 下实际 Job 审核默认工作区范围内的调用。最终授权保留本次受限范围，普通工作区写入可以直接派发，Bash 分类器核实的读取使用只读文件范围。具体范围见下文 Windows 当前实现。
 
 同日当前角色继承差量在上述 macOS／Bun 环境，以 `bun test --parallel=1 --max-concurrency=1` 逐个绝对路径执行 Service Shell、同名模型、指导输入、[默认角色](../../../../apps/service/test/isolated/default-task-roles.test.ts)及[Task 分类](../../test/isolated/permissions/task-request.test.ts)五份整文件，51项／830断言通过；Windows 专属检索整文件在本机保留1项 skip，不据此宣称 Windows 已复验。根 typecheck 的8个 workspace、边界和测试归属检查通过。指导测试中的冷读取只隔离 host Source 恢复分支，现有完整 child 角色封套恢复限制未在本轮修复。
 
@@ -210,4 +210,4 @@ Files 同轮读回的审核材料可附 `recordedFileMutations`：仅普通工�
 
 本次仅重构通用审核指导及[反馈契约](../../test/isolated/execution/authorization-check-feedback.test.ts)、[真实 SDK 受控 wire 回归](../../test/isolated/execution/authorization-check.test.ts)，不改输出 schema、执行权限或最终 gate。受控 wire 核完整 system 与三态、硬拒绝零派发；[默认 Service Files 回归](../../../../apps/service/test/isolated/full-external-files.test.ts)另核真实内外路径分类、原任务来源和 compact SDK wire，并非手工填入 `effects`。实际模型遵循程度和完整工具路由仍须最终 Mac 客户端真实流程验证，不能由提示字串或受控回答测试代替。
 
-仅 Windows 原版 Git Bash 的普通 Shell 使用当前非提升用户可访问的文件与网络。非 Full 模式需到实际 Job 作一次不可复用的人答，旧范围授权、只读分类和旧父快照不能换算成此权限；原有硬拒绝仍先行。旧式 detached 请求在非 Full 模式直接拒绝，普通 background 仍归所属运行取消。PowerShell 和固定 git.worktree worker 不采用此合同。
+仅 Windows 原版 Git Bash 的普通 Shell 使用当前非提升用户可访问的文件与网络。非 Full 模式的原装进程需实际 Job 作一次不可复用的人答，旧范围授权、只读分类和旧父快照均不能换算成原装进程权限。Auto 的默认工作区范围只有在最终快照包含实际 Job 的受限授权后才派发。高风险卡批准同一受限 Job，范围外写入或启动失败不派发原装进程。原有硬拒绝仍先行。旧式 detached 请求在非 Full 模式直接拒绝，普通 background 仍归所属运行取消。PowerShell 和固定 git.worktree worker 不采用此合同。

@@ -12,7 +12,15 @@ Probe，或 Windows Full/fallback UI 状态时。
 
 ## 当前新图与Windows资格
 
-普通 Windows Git Bash 使用受信 PATH 所指向的原装解释器，并在普通用户 token 下由原 Job 管理。不能将此前的只读、工作区或离线授权用于此进程。只读操作不构成权限例外，打开设置本身不运行 Bash。下文的受限 token、兼容副本与 ACL 证据仍用于相应受限后端或历史验收，不能据之宣称普通原装 Bash 有文件或网络沙箱。
+Windows Git Shell 在 Auto 下由实际 Shell Job 审核默认工作区范围的调用。普通风险直接执行，高风险等待人工决定，严重风险拒绝。受限运行时来自本次绑定的 Git 安装，默认允许工作区写入并使用离线环境，可核实的只读调用使用只读文件范围。原装解释器和普通用户令牌仍须满足其独立授权。受限准备失败不回退到原装执行，打开设置不运行 Bash。
+
+2026-11-28，Windows x64 的真实 Service／SQLite 以受控审核器验证 `date +%A` 只审核一次、零人工审批、实际输出星期、退出 0 并确认清理。带重定向的日期命令判为高风险，等待原卡期间文件没有变化，拒绝后仍无写入。严重风险零卡并拒绝，原装进程批准、任务取消及冷读也经过同一夹具。[原装 Git Shell 回归](../../apps/service/test/isolated/windows-original-bash-consent.test.ts)
+
+同日本机隔离 Desktop 以受控模型和真实 Shell 观察了提交只读查询、等待高风险确认、拒绝及再次查询。三条用户消息和对应回复各出现一次，只有高风险调用显示一张审批卡，拒绝后卡片消失且目标文件未创建。冷重开显示三轮历史、零待答审批，原 9 次模型执行没有增加。
+
+同日将 Git Shell 的受限范围扩展至普通工作区写入后，Windows x64 Service 回归核实普通风险无卡写入、高风险批准前无写入且批准后只写一次，高风险拒绝和严重风险均无写入。受控审核器批准的尝试写入工作区外的命令仍由 Windows 文件权限拦截，原 Job 失败并确认清理。[工作区写入回归](../../apps/service/test/isolated/windows-original-bash-consent.test.ts)
+
+同日隔离 Desktop 观察普通写入无卡完成、高风险卡拒绝后零写入、继续读取刚写入的文件，以及冷重开恢复三轮历史。三轮的用户消息和回复各显示一次，只有高风险调用显示人工审批。
 
 2026-11-18 工作区文件替换兼容性修复由原生 ACL 准备层提供。文件继承原 capability 的 `WRITE_DAC`，使 `ReplaceFileW` 可以保留原目标 ACL；目录没有这项有效权限。旧账本在原工作区锁内补齐文件继承权限，准备取消和恢复继续使用同一 SID 与未完成标记。PowerShell 5.1、PowerShell 7 和 Git Bash 的原生回归核实保存、文件占用、目录与区外拒绝和只读 Job 边界。 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash) [真实文件替换回归](../../packages/agent/test/isolated/jobs/windows-file-replace.test.ts)
 
