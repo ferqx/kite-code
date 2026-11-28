@@ -367,7 +367,7 @@ try {
   };
   const close = async (viaSidebar = false) => {
     if (viaSidebar) await page.getByRole('button', { name: 'Stream Parent', exact: true }).click();
-    await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+    await page.getByRole('button', { name: '标签页', exact: true }).click();
     await until(
       () => page.locator('.session-tab-child').count(),
       (value) => value === 0,

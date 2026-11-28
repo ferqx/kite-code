@@ -35,14 +35,10 @@ html[data-input-modality="pointer"] :focus {
 }
 
 :root {
-  --native-content-shadow: 0 1px 6px rgb(0 0 0 / 6%);
-  --native-content-border: rgb(0 0 0 / 5%);
   --native-sidebar-border: rgb(0 0 0 / 4%);
 }
 
 [data-theme="dark"] {
-  --native-content-shadow: 0 1px 6px rgb(0 0 0 / 28%);
-  --native-content-border: rgb(255 255 255 / 10%);
   --native-sidebar-border: rgb(255 255 255 / 4%);
 }
 
@@ -92,46 +88,40 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   --color-secondary-foreground: var(--foreground);
 }
 
-.native-window-menubar {
-  display: flex;
-  align-items: center;
-  width: max-content;
-  height: 100%;
-  user-select: none;
-  -webkit-app-region: no-drag;
-}
-
-.native-window-menubar button {
+.native-window-menu-button {
   display: grid;
   place-items: center;
-  height: 26px;
-  padding-inline: 8px;
+  width: var(--native-navigation-button-width);
+  height: var(--icon-button-size-sm);
+  padding: 0;
   border: 0;
   border-radius: var(--button-radius, 8px);
   background: transparent;
   color: var(--muted-foreground);
-  font: inherit;
-  font-size: var(--ui-text-size);
-  line-height: 1;
-  cursor: default;
   -webkit-app-region: no-drag;
 }
 
-.native-window-menubar button:hover:not(:disabled) {
-  background: var(--control-hover);
-  color: var(--foreground);
-}
-.native-window-menubar button[aria-expanded="true"],
-.native-window-menubar button[aria-expanded="true"]:hover:not(:disabled) {
-  background: var(--control-selected);
-  color: var(--foreground);
-}
-.native-window-menubar button:active:not(:disabled),
-.native-window-menubar button[aria-expanded="true"]:active:not(:disabled) {
-  background: var(--control-pressed);
+.native-window-menu-button svg {
+  width: var(--native-navigation-icon-size);
+  height: var(--native-navigation-icon-size);
 }
 
-.native-window-menubar button:focus-visible {
+.native-window-menu-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, transparent);
+  color: var(--foreground);
+}
+.native-window-menu-button[aria-expanded="true"],
+.native-window-menu-button[aria-expanded="true"]:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.native-window-menu-button:active:not(:disabled),
+.native-window-menu-button[aria-expanded="true"]:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, var(--foreground));
+}
+
+.native-window-menu-button:focus-visible {
+  background: var(--accent);
   outline: 1px solid var(--foreground);
   outline-offset: -2px;
 }
@@ -592,6 +582,8 @@ html[data-native-window] {
   --native-navigation-button-width: 32px;
   --native-navigation-icon-size: 18px;
   --native-navigation-gap: 6px;
+  --native-window-action-gap: 8px;
+  --native-window-separator-width: 1px;
   display: flex;
   flex-direction: column;
   height: 100dvh;
@@ -622,7 +614,7 @@ html[data-native-window]:is([data-platform="macos"], [data-platform="windows"])
   gap: var(--native-navigation-gap);
 }
 
-.native-window-frame :is(.native-window-navigation, .native-window-search, .sidebar-header-search) {
+.native-window-frame :is(.native-window-navigation, .native-window-search) {
   button {
     display: grid;
     place-items: center;
@@ -693,6 +685,12 @@ html[data-native-window][data-platform="macos"] .native-window-frame[data-window
     3 *
     var(--native-navigation-gap)
   );
+  --native-macos-title-start: calc(
+    var(--native-navigation-end) +
+    2 *
+    var(--native-window-action-gap) +
+    var(--native-window-separator-width)
+  );
 }
 
 html[data-native-window][data-platform="macos"] .native-window-titlebar {
@@ -709,6 +707,14 @@ html[data-native-window][data-platform="macos"] [data-window-navigation] .native
   box-sizing: border-box;
   width: var(--native-navigation-end);
   padding-left: var(--native-navigation-start);
+}
+
+html[data-native-window][data-platform="macos"]
+  .native-window-titlebar:has(.sidebar-toggle[aria-expanded="false"])::after {
+  position: absolute;
+  left: calc(100% + var(--native-window-action-gap));
+  pointer-events: none;
+  content: "";
 }
 
 html[data-native-window][data-platform="macos"] .kite-client.shell {
@@ -763,10 +769,13 @@ html[data-native-window][data-platform="macos"]
   [data-window-navigation]
   .kite-client.shell
   .session-header {
+  column-gap: var(--native-window-action-gap);
   padding-left: max(
     var(--session-header-start-padding),
-    calc(var(--native-navigation-end) + 8px - (100vw - 100cqw))
+    calc(var(--native-macos-title-start) - (100vw - 100cqw))
   );
+  padding-right: var(--native-window-action-gap);
+  box-shadow: inset 0 -1px var(--border);
   transition: none;
 }
 
@@ -787,16 +796,163 @@ html[data-native-window][data-platform="macos"]
 /* Windows layout follows the platform even when its backdrop falls back to a solid fill. */
 html[data-native-window][data-platform="windows"] .native-window-titlebar {
   --native-titlebar-height: env(titlebar-area-height, 40px);
-  --native-navigation-gap: 8px;
-  padding-inline-start: 8px;
+  --native-navigation-gap: 11px;
+  /* The system caption buttons are sized in window units, independently of page zoom. */
+  zoom: calc(1 / var(--native-titlebar-page-zoom, 1));
+  padding-left: calc(env(titlebar-area-x, 0px) + 8px);
+  padding-right: calc(
+    100% -
+    env(titlebar-area-x, 0px) -
+    env(titlebar-area-width, calc(100% - 144px)) +
+    2 *
+    var(--native-window-action-gap) +
+    var(--native-window-separator-width)
+  );
+  background: var(--native-content-dark-background, var(--page-background));
 }
 
-html[data-native-window][data-platform="windows"] .native-window-content {
+.native-window-titlebar > .native-window-session {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: transparent;
+}
+
+.native-window-session:has(.session-header > button)::after {
+  position: absolute;
+  right: calc(-1 * (var(--native-window-action-gap) + var(--native-window-separator-width)));
+  pointer-events: none;
+  content: "";
+}
+
+.native-window-titlebar:has(> .native-window-session)::before {
+  position: absolute;
+  inset: auto 0 0 var(--native-titlebar-border-left, 0px);
+  border-bottom: 1px solid var(--border);
+  pointer-events: none;
+  content: "";
+}
+
+@supports (left: anchor(--native-workspace-navigation right, 0px)) {
+  /* Paint through the top row from the same panels' edge, even during width animation. */
+  html[data-native-window][data-platform="windows"]
+  .native-window-frame:where(:has(> .native-window-titlebar > .native-window-session)) {
+    position: relative;
+    isolation: isolate;
+
+    #navigation {
+      anchor-name: --native-workspace-navigation;
+    }
+
+    &::before,
+    &::after {
+      position: absolute;
+      z-index: -1;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+    }
+
+    &::before {
+      left: anchor(--native-workspace-navigation right, 0px);
+      background: var(--native-content-dark-background, var(--page-background));
+    }
+
+    &::after {
+      right: anchor(--native-workspace-navigation right, 100%);
+      background: var(--native-navigation-surface);
+      backdrop-filter: var(--native-navigation-filter);
+    }
+
+    > .native-window-titlebar,
+    > .native-window-content :is(.kite-client.shell, .client-sidebar-panel) {
+      background: transparent;
+    }
+
+    > .native-window-content .client-sidebar-panel {
+      backdrop-filter: none;
+    }
+
+    .client-content-frame {
+      anchor-name: --native-workspace-content;
+    }
+
+    > .native-window-titlebar {
+      anchor-name: --native-workspace-titlebar;
+
+      &::before {
+        content: none;
+      }
+    }
+
+    > .native-window-content::after {
+      position: fixed;
+      z-index: 100;
+      zoom: calc(1 / var(--native-titlebar-page-zoom, 1));
+      inset: auto 0 anchor(--native-workspace-titlebar bottom)
+        anchor(--native-workspace-content left);
+      border-bottom: 1px solid var(--border);
+      pointer-events: none;
+      content: "";
+    }
+  }
+}
+
+html[data-native-window] .native-window-session > .session-header {
+  height: 100%;
+  min-height: 0;
+  gap: var(--native-window-action-gap);
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.native-window-session .session-header-heading {
+  --native-titlebar-heading-start: min(
+    var(--native-titlebar-heading-inset, 0px),
+    max(0px, 100% - 1em)
+  );
+  position: relative;
+  height: 100%;
+}
+
+.native-window-session .session-header-heading::before {
+  position: absolute;
+  inset: 0 auto 0
+    min(
+      var(--native-titlebar-divider-offset, 0px),
+      calc(var(--native-titlebar-heading-start) - 16px)
+    );
+  width: var(--native-titlebar-divider-width, 0px);
+  background: var(--native-sidebar-border);
+  pointer-events: none;
+  content: "";
+}
+
+.native-window-session:has(.session-header > button)::after,
+.native-window-titlebar:has(.sidebar-toggle[aria-expanded="false"]) .session-header-heading::before,
+html[data-native-window][data-platform="macos"]
+  .native-window-titlebar:has(.sidebar-toggle[aria-expanded="false"])::after {
+  inset-block: 0;
+  width: var(--native-window-separator-width);
+  height: 18px;
+  margin-block: auto;
+  border-left: var(--native-window-separator-width) solid var(--input);
+  background: none;
+}
+
+.native-window-session .breadcrumb {
+  position: absolute;
+  inset: 0 0 0 var(--native-titlebar-heading-start);
+}
+
+.native-window-session :is(button, a) {
+  -webkit-app-region: no-drag;
+}
+
+html[data-native-window][data-platform="windows"] .native-window-content:has(> .desktop-startup) {
   padding: 6px;
-}
-
-html[data-native-window][data-platform="windows"] .native-window-titlebar + .native-window-content {
-  padding-block-start: 0;
 }
 
 html[data-native-window]:is(
@@ -877,7 +1033,6 @@ html[data-native-window]:is(
   margin-top: var(--native-panel-inset);
 }
 
-/* Only the exterior shell owns decoration; content and tools fill their allocation. */
 html[data-native-window] .kite-client .client-content-frame {
   box-shadow: none;
 }
@@ -910,7 +1065,7 @@ html[data-native-window]:is([data-platform="windows"], [data-window-material="vi
   border-radius: 0;
 }
 
-/* One exterior outline encloses navigation, conversation and tools together. */
+/* Keep the animated panels clipped to their shared workspace. */
 html[data-native-window]:is(
     [data-platform="windows"],
     [data-window-material="vibrancy"]
@@ -918,18 +1073,6 @@ html[data-native-window]:is(
   .client-panels {
   position: relative;
   overflow: hidden;
-  border-radius: var(--radius);
-  box-shadow: var(--native-content-shadow);
-}
-
-html[data-native-window][data-platform="windows"] .kite-client .client-panels::after {
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  border: 1px solid var(--native-content-border);
-  border-radius: inherit;
-  pointer-events: none;
-  content: "";
 }
 
 /* The right pane is a section of the shared surface, without its own exterior or inset. */
@@ -990,10 +1133,6 @@ html[data-native-window][data-platform="macos"]
   margin: 0;
   border-radius: 0;
   box-shadow: none;
-}
-
-html[data-native-window][data-platform="macos"] .kite-client .client-panels::after {
-  border: 0;
 }
 
 .native-browser-page {

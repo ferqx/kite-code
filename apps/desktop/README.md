@@ -8,17 +8,43 @@
 
 ## 主窗口导航
 
+会话顶部的「标签页」按钮负责右侧栏收展。展开时按钮用选中底色与收起图标标示状态，点击同一按钮即可收起；标签条右端保留新建按钮。收起后再次展开会显示原有标签。 [共享会话页面](../../packages/ui/src/desktop/SessionPage.tsx)
+
+右侧标签页以底色表示选中，键盘焦点绘制在标签按钮内缘。Windows 实窗以 150% 显示缩放核对了深浅主题、方向键切换和关闭标签，选中标签的外描边已移除。 [共享样式](../../packages/ui/src/desktop/style.css)
+
+2026-11-28 在 150% 显示缩放的隔离 Windows 实窗验证键盘展开、鼠标收起和 Esc 收起。顶栏按钮随状态切换底色和图标，重新展开时保留两个标签及原选中项，焦点回到顶栏按钮。共享标签页、详情栏和浏览器布局回归通过。扩展 Native 回归中的无主运行读取与运行中输入提交两条失败，在复用改动前标签栏实现的对照运行中同样复现。
+
 页面历史由主窗口 Renderer 按当前 Store 保存页面身份和游标。会话选择和搜索结果复用原 `onOpen/select`，新对话和定时任务复用原入口。首条提交由原新对话页面交接为持久会话时替换该条历史。后退和前进只移动游标，随后普通导航会清除旧前进记录。每次遍历按当前已核实的目录查找可访问目标，并沿原选择代次重读。设置和搜索浮层、右侧标签各自管理打开状态。窗口重建从当前页面重新开始记录。 [页面历史](src/native-page-history.ts) · [主页面](src/native.tsx)
 
-Windows 在「帮助」右侧按侧栏收展、后退和前进排列。共享页面根据侧栏宽度过渡的完成状态挂载搜索入口。展开完成后入口在「Kite」标题行右端，收起完成后在顶栏前进按钮右侧。启用减少动态效果时直接采用目标位置。关闭搜索时将焦点恢复到当前可用的入口。macOS 在原生窗口按钮之后放置四个控件，标题为固定控件区域留位。缓存会话进入可操作状态时沿用同一排队编辑焦点标识，避免标题栏焦点被核对完成事件移到输入框。 [窗口标题栏](src/native-window-frame.tsx) · [会话外壳](../../packages/ui/src/desktop/SessionPage.tsx)
+Windows 在「应用菜单」右侧按侧栏收展、后退、前进和搜索排列。左侧五个 28px 按钮之间各留 11px，在默认 200px 侧栏上方两端各留约 8px。右侧会话操作沿用 8px 间距。共享页面将同一个搜索按钮挂到固定的顶栏容器，侧栏宽度变化时保留按钮及其位置。关闭搜索时将焦点恢复到该按钮。macOS 在原生窗口按钮之后放置四个控件，沿工作区实际尺寸定位会话标题。侧栏收起时，标题回到搜索之后的默认留位，由 18px 高的居中竖线隔开，竖线两侧各留 8px。会话标题下方绘制 1px 内边线，右侧操作之间和内容区右缘各留 8px。缓存会话进入可操作状态时沿用同一排队编辑焦点标识，避免标题栏焦点被核对完成事件移到输入框。 [窗口标题栏](src/native-window-frame.tsx) · [会话外壳](../../packages/ui/src/desktop/SessionPage.tsx)
 
-Windows 的系统标题栏区域高 40px，应用按钮和菜单在同一行居中，正文区域从标题栏底边开始。Renderer 优先使用原生覆盖区报告的高度，默认按 40px 布局。Windows 菜单文字沿用共享 UI 的 `--ui-text-size`，macOS 和 Windows 顶栏图标按钮与「添加项目」共用 `--icon-button-size-sm` 和 `--ui-icon-size`。 [窗口配置](electron/main.ts) · [标题栏样式](src/native-tailwind.css)
+2026-11-28，搜索按钮迁入顶栏时，以 150% 显示缩放的隔离 Windows 实窗核对交互。收起、展开和拖宽侧栏期间的 885 帧采样中，搜索始终是顶栏同一个按钮。展开时鼠标点击、收起时用 Enter 均能打开原生搜索，输入框自动聚焦并显示会话结果，按 Esc 关闭后焦点回到顶栏搜索按钮。
 
-2026-11-27 在 Windows Electron 44.3.0 的隔离 Root 窗口实测。深色 800px 窗口和切为浅色后拉宽至 1100px 时，搜索按钮与「Kite」垂直中心对齐，右侧留 10px，按钮为 28×28px、图标为 14px。展开侧栏时从标题行打开搜索，收起后从顶栏打开搜索，关闭后焦点分别回到当前入口。顶栏导航的上下留白为 6px，从「帮助」到前进的相邻控件间距为 8px。Chromium 158 浏览器夹具逐帧确认侧栏开合只有一个搜索入口，并覆盖 macOS 布局、会话往返和窗口重载。搜索动作由隔离夹具回传。 [浏览器回归](test/session-shell-browser-runner.fixture.ts)
+同日调整按钮间距后，在相同缩放下实测四个间隙均为 11 个窗口逻辑像素，默认侧栏两端各约 8px。侧栏收展和拖宽重新采样，搜索按钮位置稳定。Windows 与 macOS 的浏览器导航回归通过。
+
+Windows 将会话标题、环境信息、标签页及原会话标题区操作合入 40px 顶栏。`NativeWindowFrame` 在内容面板、宿主标题槽和窗口尺寸变化时同步两者的实际位置。顶栏分隔线跟随实际侧栏右缘，留位以共享的默认侧栏宽度 200px 为下限。收起时顶栏跟随侧栏过渡回到这个下限，重新展开时恢复按侧栏实际宽度对齐。标题在顶栏分隔条之后留 16 个窗口逻辑像素，并按可用宽度让开搜索与右侧操作。顶栏的 1px 下边框从正文左缘开始。侧栏展开时，下边框贴着侧栏分隔线的右缘。应用操作使用原生覆盖区坐标，组合窗口的根 `WebContentsView` 未得到覆盖区几何时，按 144 个窗口逻辑像素给系统按钮留位。应用操作与系统按钮之间的分隔符为 1px 宽、18px 高的居中竖线，两侧各留 8px。侧栏收起时，左侧顶栏分隔符复用这一样式。preload 就地读取 `webFrame` 缩放比例，使应用顶栏和系统按钮一起保持窗口逻辑像素尺寸。共享 `SessionPage` 向宿主挂载同一套标题树，正文区的 `--session-header-height` 为 0，页脚继续按实测高度维护滚动留白。macOS 和 Windows 顶栏图标按钮与「添加项目」共用 `--icon-button-size-sm` 和 `--ui-icon-size`。 [窗口配置](electron/main.ts) · [标题栏样式](src/native-tailwind.css)
+
+2026-11-28，Windows x64／Electron 44.3.0，隔离实窗核对会话标题左对齐与 1px 下边框。侧栏收起和展开各观察 61 帧，标题避让导航及搜索，边框随左侧栏移动。拖宽侧栏后重复核对，草稿与阅读位置保留。1100px 深色和 800px 浅色窗口的系统截图取样确认下边框位于主内容区上方，缩放 80%／100%／125% 时位置和高度与原生窗口坐标一致。
+
+同日以 150% 显示缩放在隔离 Windows 窗口取样。下边框与侧栏分隔条交界处的 2 个物理像素间隙消除。展开和拖宽后的截图确认侧栏的竖线贯通顶栏与正文，收起时正文区域的竖线消失。收展和拖宽过程取样确认竖线与下边框持续对齐，会话标题取自正文左缘的内距保持 16 个窗口逻辑像素。
+
+随后将下边框锚定正文左缘，顶栏竖线保留自己的完整宽度。150% 显示缩放的 Windows 实窗前后对照中，原有下边框覆盖分隔条的两列物理像素。修复后，默认侧栏、拖宽侧栏和 125% 页面缩放下，下边框都从正文区首列像素开始。浏览器回归覆盖侧栏收展中的边线位置和 macOS 顶栏。
+
+旧收起布局以同样的 150% 显示缩放取样。深浅主题下，搜索与会话标题之间的竖线均接到顶栏下边框。收展过程的 561 帧样本确认收起到位才显示顶栏竖线，重新展开恢复侧栏分隔线。浏览器导航回归同时覆盖减少动态效果。
+
+此前保留展开宽度的版本以 150% 显示缩放在隔离 Windows 实窗验证。默认侧栏和拖宽至约 374px 各收展一轮，共取样 686 帧，分隔线和标题的横坐标保持一致。收起后正文左缘归零，竖线仍接到顶栏下边框。将窗口收窄至 800px 并把页面放大到 150% 后，标题按可用空间省略，未覆盖右侧按钮。Windows 与 macOS 布局的浏览器回归通过。
+
+恢复默认留位后，以 150% 显示缩放在隔离 Windows 实窗重新取样。默认和约 374px 的侧栏收起时，顶栏分隔符都落在 200px 处，标题回到同一位置，展开后恢复原宽度。收展过程取样 569 帧。深浅主题截图中两条短分隔符的颜色与高度一致，右侧分隔符两侧的间距各为 8 个窗口逻辑像素。浏览器导航与 Windows 三种窗口材质的布局回归通过。
+
+同日以 Chromium 158 的 macOS 样式回归核对 800px 视口。收起时搜索与标题之间显示 18px 高的居中竖线，标题下边框可见。拖宽侧栏后收起，标题回到默认位置，重新展开时恢复对齐。右侧按钮之间及末项到内容区右缘均为 8px。此次验证覆盖生产样式与交互，macOS 原生窗口和系统玻璃合成尚待实机验证。
+
+2026-11-28，Windows x64／Electron 44.3.0，在独立 Profile 和配套 Service 中核对深色 1100px、浅色 800px 窗口及页面缩放 80%／100%／125%。会话标题、两个操作按钮与系统按钮保持同一行，正文从顶栏下缘开始。实测点击两个操作按钮、用 Enter 打开标签页及 Esc 关闭后归还焦点，并双击标题最大化和还原。左栏收展和调宽保留草稿与阅读位置，右侧原生文件预览在窄窗收起后随宽度恢复。生产样式浏览器另核两组平台导航及三个 Windows 材质标记。此范围覆盖隔离本机窗口和浏览器回归。
+
+2026-11-27 旧布局在 Windows Electron 44.3.0 的隔离 Root 窗口实测。深色 800px 窗口和切为浅色后拉宽至 1100px 时，搜索按钮与「Kite」垂直中心对齐，右侧留 10px，按钮为 28×28px、图标为 14px。展开侧栏时从标题行打开搜索，收起后从顶栏打开搜索，关闭后焦点分别回到当前入口。顶栏导航的上下留白为 6px，从「帮助」到前进的相邻控件间距为 8px。Chromium 158 浏览器夹具逐帧确认侧栏开合只有一个搜索入口，并覆盖 macOS 布局、会话往返和窗口重载。搜索动作由隔离夹具回传。 [浏览器回归](test/session-shell-browser-runner.fixture.ts)
 
 2026-11-27 在 Windows x64 使用 Chromium 158 的隔离构建验证 Windows 和 macOS 两种布局，逐帧核对侧栏开合、切换标题、正文身份、阅读位置及箭头焦点。另在隔离 Electron 44.3.0 窗口核对系统标题栏可用矩形、收起状态搜索入口和焦点恢复、鼠标后退及键盘前进。搜索浮层的关闭动作由夹具回传，macOS 实窗和安装版资格仍待验证。DOM 回归覆盖首条提交交接、迟到选择响应、断线恢复和分叉后的前进记录。启动恢复草稿与定时任务回归中各一条旧断言在 `17dcef51f` 基线同样失败。 [浏览器回归](test/session-shell-browser-runner.fixture.ts) · [页面历史回归](test/isolated/native-session-shell-dom.test.tsx) · [首条提交回归](test/isolated/native-new-conversation-dom.test.tsx)
 
-收展时机补验使用 `17dcef51f` 加当前工作树。Windows 隔离 Electron 窗口的 24 帧收起过程中顶栏搜索保持隐藏，收起完成后可打开搜索，关闭时焦点回到入口。Chromium 158 的 `--page-navigation` 回归另覆盖延长动画、收起途中重新展开、减少动态效果及 macOS 布局。 [浏览器回归](test/sidebar-actions-browser.fixture.ts)
+旧布局的收展时机补验使用 `17dcef51f` 加当时工作树。Windows 隔离 Electron 窗口的 24 帧收起过程中顶栏搜索保持隐藏，收起完成后可打开搜索，关闭时焦点回到入口。Chromium 158 的 `--page-navigation` 回归另覆盖延长动画、收起途中重新展开、减少动态效果及 macOS 布局。 [浏览器回归](test/sidebar-actions-browser.fixture.ts)
 
 ## 侧栏会话搜索
 
@@ -338,6 +364,8 @@ Desktop renderer的普通图标沿共享`--ui-icon-size:14px`，原16px的设置
 2026-10-24，Windows x64（10.0.26300）／Electron44.3.0／Bun1.4.3：Main 回归30项352断言、Desktop typecheck、定向Biome与文档检查通过。普通 Main／生产 renderer 构建在独立 Profile、真实配套 Service 下正常启动并退出；随后仅在隔离测试制品加入私有观察端口，逐步观察关窗隐藏且托盘保留、投递 Tray 双击事件恢复并聚焦同一窗口、最小化后恢复，以及点击托盘原生菜单“退出”。最终 Main 退出0，准确所属 Service PID 已消失；双击事件与菜单展开由该测试端口触发，原生菜单退出由实际 Windows UI 点击；没有取得通知区域物理双击／右键或完整安装包资格，不将该端口加入普通开发或正式客户端。本机原始证据已缺失。
 
 ## Markdown 与附件输入
+
+桌面会话的主提示词输入框只绘制自身的细边框，键盘聚焦时通过既有边框颜色提示。150% 显示缩放的 Windows 实窗前后对照核对了深浅主题、鼠标点击、键盘输入、Tab 切换和失焦。聚焦时仍显示边色，输入框尺寸与草稿在这些操作中保持稳定。 [会话样式](src/native-content-theme.css)
 
 Office、Microsoft 365 和 PDF 的文件图标由 UI 的[文件格式映射](../../packages/ui/src/desktop/output-file-format.ts)统一选择。待发送、发送占位和历史消息共用同一文件卡。2026-11-24 在 Windows x64／Chrome 158 使用[附件浏览器夹具](test/image-previews-browser-runner.fixture.ts)的 `--office-attachments` 验证 15 种图标，覆盖 1280／390px 深浅主题下的添加、移除、投递占位、保存接管、横向浏览、切回、重开和失败。另通过正文文件引用与轮次产物浏览器回归。验证使用隔离的桌面渲染组件和受控回执。该夹具旧的 `--attachments` 图片场景缺少当前原生预览桥接，等待读取图片超时。
 
@@ -775,7 +803,7 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，无
 
 冷开已结束的会话时，[Native](src/native.tsx)仅对最新一条待核实的普通最终回复请求首屏等待。正文不超过 64 KiB 且原读取准入已具备时，[SessionPage](../../packages/ui/src/desktop/SessionPage.tsx)沿现有加载指示最多等待 250 ms，原正文读取器保持挂载并按同一身份读取。正文就绪即展示历史及输入区，超时先展示已有历史。缓存回切和已展示页面保持当前阅读。
 
-Native [renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `nativeWindow` 布局，由[窗口容器](src/native-window-frame.tsx)承载启动与业务页面，启动页显隐按[启动显示规则](#原启动页与初始化重试)。普通 DOM 嵌入默认不套窗口布局。Windows／Linux 的沉浸式窗口顶栏单独占32px，内容区从 y=32px 开始；Mica 会话面板另按下文圆角留白内缩。macOS 将原生窗口按钮与48px业务 header 整合，内容区从 y=0 开始，不再额外保留32px空行。[Main](electron/main.ts)在 Windows／Linux 设置 `titleBarStyle: hidden` 和32px的透明 `titleBarOverlay`，不另显示系统应用图标与标题；macOS 保 `hiddenInset`，traffic-light位置为 `{x:13,y:17}`，与业务 header 垂直居中。`nativeTheme` 更新同步按钮符号颜色，窗口背景继续沿原主题端口。选择 [Electron 原生叠层](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)是为了保留宿主的窗口操作，不新建最小化／关闭 IPC 或另一套按钮状态。
+Native [renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `nativeWindow` 布局，由[窗口容器](src/native-window-frame.tsx)承载启动与业务页面，启动页显隐按[启动显示规则](#原启动页与初始化重试)。普通 DOM 嵌入默认不套窗口布局。Windows 的沉浸式顶栏高 40px 并承载会话标题与操作。Linux 的独立顶栏高 32px。会话工作区从各自窗口顶栏下缘开始。macOS 将原生窗口按钮与48px业务 header 整合，内容区从 y=0 开始，不再额外保留32px空行。[Main](electron/main.ts)在 Windows／Linux 设置 `titleBarStyle: hidden` 和透明 `titleBarOverlay`，不另显示系统应用图标与标题；macOS 保 `hiddenInset`，traffic-light位置为 `{x:13,y:17}`，与业务 header 垂直居中。`nativeTheme` 更新同步按钮符号颜色，窗口背景继续沿原主题端口。选择 [Electron 原生叠层](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)是为了保留宿主的窗口操作，不新建最小化／关闭 IPC 或另一套按钮状态。
 
 [Main](electron/main.ts)创建主窗口时设置 `minWidth: 800`（Electron逻辑像素），初始尺寸保持1100×780；系统调宽受此下限约束。当前没有保存／恢复窗口尺寸的独立路径。共享页面仍适应缩放后的CSS宽度，左侧栏仅由按钮收展；header和底部个人工作区的内边距不再受900px媒体查询改写。
 
@@ -805,17 +833,19 @@ Windows 设置页的 `.desktop-settings-header` 不再预留额外高度，`.set
 
 2026-11-01，Windows x64／Electron44.3.0：实际开发窗口前后核左栏返回行上移42px，右侧外框和菜单栏保持；独立Profile、生产renderer（诊断关闭）与原配套Service另核常规／MCP切换、顶部返回按钮及原页面恢复，窗口正常退出0，5个所属进程全部结束，零模型请求。原窗口动作DOM整文件1项21断言、CSS Biome及文档检查通过；仅改CSS，不扩展安装版或其他平台资格。本机原始证据已缺失。
 
-[窗口容器](src/native-window-frame.tsx)在进入主界面后，于 Windows 顶栏左侧绘制“文件、编辑、视图、帮助”，沿共享主题颜色和圆角，菜单按钮使用 `no-drag`，其余顶栏保持原拖动区域。菜单支持 F10、左右键与下键，以及 Alt+F／E／V／H；点击时保留原编辑器焦点与选区。macOS／Linux 主界面保留原顶栏。窗口布局由 `NativeDesktop` 明确启用，启动准备及失败页按[启动显示规则](#原启动页与初始化重试)隐藏 header，进入应用后顶栏菜单保留在设置浮窗背后。
+[窗口容器](src/native-window-frame.tsx)在 Windows 主界面顶栏左侧显示单个「应用菜单」图标按钮。按钮沿用导航按钮的尺寸、主题颜色、圆角和 `no-drag`，弹出期间显示展开状态。F10 聚焦按钮，Enter、空格和下方向键打开菜单，Alt+F／E／V／H 直达原分类。指针打开保留编辑焦点，按键从按钮打开前恢复此前的焦点，供原生编辑命令处理当前选区。窗口布局由 `NativeDesktop` 明确启用，启动准备和失败页按[启动显示规则](#原启动页与初始化重试)隐藏顶栏，进入应用后顶栏菜单保留在设置浮窗背后。
 
-[菜单 owner](electron/native-window-menu.ts)定义中文原生项，[Main](electron/main.ts)安装隐藏的窗口菜单以保留原生快捷键，再从相同模板通过 [Electron Menu.popup](https://www.electronjs.org/docs/latest/api/menu#menupopupoptions)打开对应下拉，不增加另一行菜单。编辑、缩放、全屏、隐藏与退出使用 Electron roles，退出仍经过原 `before-quit` 与 `settleDesktopQuit`。文件前三项沿固定事件返回原 renderer controller 的 `prepareConversation`、`addWorkspace` 与设置状态；Ctrl+N／O／, 在 Main 的 `before-input-event` 中按同一固定动作分发，拒绝组词、重复和额外修饰键，并阻止重复进入原生 accelerator。F10／Alt 导航留给 renderer。准备中、原 mutation 进行中或退出中不进入页面操作，迟到事件同样核当前状态。进入新对话保原草稿，不创建会话或发任务，添加空间保持原准确选择及登记路径。
+[菜单 owner](electron/native-window-menu.ts)定义中文原生项，[Main](electron/main.ts)安装隐藏的窗口菜单以保留原生快捷键，再用相同模板通过 [Electron Menu.popup](https://www.electronjs.org/docs/latest/api/menu#menupopupoptions)打开完整菜单或指定分类。完整菜单原生呈现「文件」「编辑」「视图」「帮助」四个子菜单。编辑、缩放、全屏、隐藏与退出使用 Electron roles，退出仍经过原 `before-quit` 与 `settleDesktopQuit`。文件前三项沿固定事件返回原 renderer controller 的 `prepareConversation`、`addWorkspace` 与设置状态。Ctrl+N／O／, 在 Main 的 `before-input-event` 中按同一固定动作分发，拒绝组词、重复和额外修饰键，并阻止重复进入原生 accelerator。F10／Alt 导航留给 renderer。准备中、原 mutation 进行中或退出中不进入页面操作，迟到事件同样核当前状态。进入新对话保留原草稿，添加空间保持原准确选择及登记路径。
 
 Windows 原生设置使用独立的顶层设置视图；设置打开时 Main 不派发新对话、添加空间或重复打开设置的自定义应用菜单命令，关闭后恢复。设置不会因外部鼠标或失焦自动关闭；下拉菜单的 Escape 先退出菜单，再退出表单或设置。
 
 2026-11-01，Windows x64／Bun1.4.3，`be57a4a1d`加当前工作树：在现有development Electron44.3.0窗口复现双击“默认编辑器”退回主页面；修复后逐步核对常规下拉框双击、提供商未提交表单的输入框选词与预设下拉框双击、第一次Escape关闭编辑栏／第二次关闭设置，配置未提交并恢复原会话。原[窗口操作回归](test/isolated/native-window-actions-dom.test.tsx)在修复前以焦点守卫聚焦复现设置卸载，修复后核外部焦点／第二次pointerdown不关闭、原事件取消、菜单仍可调用及Select／设置两级Escape；整文件1项／34断言通过。连同原[页面壳](test/isolated/native-new-conversation-dom.test.tsx)共82项／1776断言、Desktop类型检查和定向Biome通过。范围为当前开发窗口及上述DOM事件，不代替完整安装发行或其他平台验证。
 
-[封闭菜单 bridge](src/native-menu-bridge.ts)只暴露四个 menu ID、整数位置与当前可操作状态，以及三个固定页面动作。[preload](electron/preload.ts)过滤未知事件并在卸载时移除监听；Main 核当前窗口、准确主 frame、renderer URL、Windows 平台、闭合 payload 和窗口边界，按实际页面缩放换算下拉位置，窗口菜单端口不打开 Service caller。宿主错误返回通用失败，顶栏允许再次打开。设置和目录仍由已有业务端口核权限。
+[封闭菜单 bridge](src/native-menu-bridge.ts)接受应用菜单和四个分类 ID、整数位置与当前可操作状态，回传三个固定页面动作。[preload](electron/preload.ts)过滤未知事件并在卸载时移除监听。Main 核当前窗口、准确主 frame、renderer URL、Windows 平台、闭合 payload 和窗口边界，按实际页面缩放换算下拉位置。宿主错误返回通用失败，顶栏允许再次打开。设置和目录仍由已有业务端口核权限。
 
-[菜单端口测试](test/native-window-menu.test.ts)覆盖页面缩放、禁用项、文件快捷键的修饰／组词／重复边界、外来窗口／frame／文档、开发 HTTP 边界、闭合参数和宿主错误；[窗口 DOM](test/isolated/native-window-actions-dom.test.tsx)核四个菜单、现有页面动作、设置页菜单可访问、设置返回、添加空间原请求、草稿保留及零任务提交。
+[菜单端口测试](test/native-window-menu.test.ts)覆盖应用菜单和分类请求、页面缩放、禁用项、文件快捷键的修饰／组词／重复边界、外来窗口／frame／文档、开发 HTTP 边界、闭合参数和宿主错误。[窗口 DOM](test/isolated/native-window-actions-dom.test.tsx)核单按钮、展开状态、重复打开、失败重试、快捷键、编辑焦点、现有页面动作、设置返回、添加空间原请求、草稿保留及零任务提交。
+
+2026-11-28，Windows x64／Electron 44.3.0／Bun 1.4.4，`eea8bd270` 加本次变更。在独立 Profile、真实配套 Service 和关闭诊断的 Native 构建中，逐步核对鼠标打开四个分类、方向键进入子菜单、Esc 返回上层、外部点击关闭、再次点击菜单按钮只关闭一次、F10 后用下方向键重开，以及 Alt+H 直达帮助。展开期间按钮提示隐藏，顶栏和正文位置稳定。通过「编辑 → 全选」核对原输入焦点、完整选区和草稿。发布 UIAutomation 脚本在同一窗口通过 F10／下方向键打开菜单，再打开「文件」并选择「退出」，Main 正常结束。定向窗口测试 15 项通过。单独的启动草稿断言在基线与本次变更均复现失败。本次实机范围为独立构建的窗口及退出操作。
 
 2026-10-14 Windows x64／Bun 1.4.2／Electron 44.3.0，`5f41fc3d` 加本次菜单 diff：使用当前 Main／preload、普通 renderer 构建与独立 Profile／真实配套 Service，实际窗口核四个入口、原生下拉、保留原输入焦点与全选、文件菜单进入设置／新对话、设置页继续打开菜单、草稿保留、Electron 输入端口的 Ctrl+, 与 F11 全屏／返回、F10／左右／下键与 Alt+H、实际放大／恢复、用户菜单暗／亮主题、32px初始内容起点及500px窄窗口。零页面异常、Main 正常退出0；文件快捷键验证使用 Electron 输入端口，原生项选择使用实际 MenuItem，不代证物理键盘／系统菜单鼠标点选。菜单端口、原窗口 IPC、窗口动作 DOM 与启动 DOM 四个完整文件13项／181断言通过；Desktop typecheck、定向 Biome、文档结构／影响核对和统一边界检查通过，Biome 保留原未改动 fragment 提示，构建保原 CSS keyframes 与大 chunk 提示。未运行完整默认测试、正式安装制品或其他平台新窗口；这项菜单改动不提升这些资格。
 
@@ -825,31 +855,35 @@ Windows 原生设置使用独立的顶层设置视图；设置打开时 Main 不
 
 2026-11-07，Windows／Bun1.4.4，`5d39518e1`加本轮样式：分隔线与用户消息内边距调整的生产CSS编译、两文件Biome、文档结构及影响检查通过。沿原隔离bridge与实际Native组件逐步观察1280px深浅主题、两侧鼠标拖动和键盘调宽、设置打开／返回，以及900px下定时任务编辑右栏打开／取消：内部分隔线为4%单线，右栏宿主不重复描边，草稿和原用户／助手消息各一份；用户气泡计算上下内边距由12px变10px，单行总高由54px变50px，左右16px与底色保持。本轮仅变更Native CSS，复用未变的组件JS与既有行为测试；未重验完整安装版或原生材质最终合成。900px且左栏扩至420px时，浏览器标签栏宽度折叠为0，调整前后CSS同样复现，此次未改变该布局行为。本机原始证据已缺失。
 
-三栏整体的外沿使用 [Native CSS](src/native-tailwind.css) 的 `--native-content-shadow`：深浅主题均为向下1px、模糊6px的单层黑色阴影，亮色不透明度6%、深色28%。唯一1px半透明描边由 `.client-panels::after` 与 `.desktop-settings.settings-layout::after` 绘制，包住左侧玻璃栏、主区和右栏；`--native-content-border` 亮色为黑色5%、深色为白色10%。最外层统一圆角和裁切，内部 `.client-content-frame` 及右栏不再单独设置圆角、外边距、阴影或外沿描边；内部左右分隔线独立消费`--native-sidebar-border`，浅色为黑色4%、深色为白色4%；左栏调宽线、材质设置导航的右边线与右栏左边线保持1px声明，外框描边不变。覆盖式右栏的`#details`宿主不再重复描边，分隔线由`.right-sidebar`持有，原生浏览器继续读取该边框的宽度与RGBA颜色。调宽把手保留原命中、悬浮／聚焦提示和键盘行为。macOS继续保持直角、零外留白和无外沿描边。
+Windows 会话工作区的 [Native CSS](src/native-tailwind.css) 沿 `.client-panels` 裁切分栏动画，工作区在窗口边缘使用直角并取消外留白、外沿描边和阴影。内部 `.client-content-frame` 与右栏铺满各自分配区域。内部左右分隔线独立消费`--native-sidebar-border`，浅色为黑色4%、深色为白色4%；左栏调宽线、材质设置导航的右边线与右栏左边线保持1px声明，外框描边不变。覆盖式右栏的`#details`宿主不再重复描边，分隔线由`.right-sidebar`持有，原生浏览器继续读取该边框的宽度与RGBA颜色。调宽把手保留原命中、悬浮／聚焦提示和键盘行为。macOS继续保持直角、零外留白和无外沿描边。
 
 Windows 导航的 [Native CSS](src/native-tailwind.css) 将宽侧栏和窄窗口侧栏的外层左右 padding 归零，列表内边距设为6px、header设为10px；底部用户区沿共享负 margin 抵消列表内边距，使顶部分隔线铺满侧栏。此布局也适用于 Windows 实色回退，不改变调宽与收展逻辑。
 
 [Main](electron/main.ts)通过[外观选择](electron/native-window-appearance.ts)按实际 Windows build 选材质。build 22621 起使用 Electron `backgroundMaterial: mica`，支持范围见 [Electron](https://www.electronjs.org/docs/latest/api/base-window#winsetbackgroundmaterialmaterial-windows)及 [DWM](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type)。build 17763 至 22620 使用同一桌面制品已校验的 [Windows Node-API 后端](native/windows-access/README.md)，在自己的根 HWND 上尝试系统 Acrylic。后端查系统透明开关、高对比度、节电和远程会话，仅在 DWM 接受模糊与客户区玻璃时开放透明背景。主题、系统设置、合成变化与窗口重显时由 Main 重查，失败时 Root 与原生窗口使用主题实色。更早 Windows 和 Linux 走实色，macOS 使用 Vibrancy。具体取舍见 [Windows 窗口材质与布局记录](../../.agents/notes/implemented/feature/2026-11-25-windows-acrylic-layout.md)。
 
-`getWindowAppearance()`沿前述窗口守卫只读 Main 选择，不从构建机、NODE_ENV或浏览器 User Agent猜支持情况。renderer在挂载前读取闭合 `mica/acrylic/vibrancy/none`，读取失败或旧bridge缺此端口时按 `none`；这项外观读取不依赖 Service成功连接。报告原生材质的 Native 窗口共用透明 root／body／Frame／shell作为材质承载层，窗口顶栏直接显示原生材质；`.client-sidebar-panel` 叠上述半透明主题灰色，内部 `.sidebar-header`／`.sidebar` 保持透明，窄侧栏使用同一背景规则。主面板、会话header及main保留实色背景，输入框与用户消息共用输入区底色，卡片沿所属主题。共享Web不消费Native材质标记，Windows／Linux 独立32px顶栏及原运行权限保持。
+`getWindowAppearance()`沿前述窗口守卫只读 Main 选择，不从构建机、NODE_ENV或浏览器 User Agent猜支持情况。renderer在挂载前读取闭合 `mica/acrylic/vibrancy/none`，读取失败或旧bridge缺此端口时按 `none`；这项外观读取不依赖 Service成功连接。报告原生材质的 Native 窗口共用透明 root／body／Frame／shell 作为材质承载层。Windows 工作区以导航面板右缘作为 CSS 锚点，在窗口背景层连续绘制左侧导航材质和右侧 [Native 内容主题](src/native-content-theme.css) 底色。两层分别延伸至各自上方的工具栏区域，侧栏开合或调宽时交界跟随实际边缘。顶栏和左栏直接露出对应背景，左侧导航的子级保持透明。主面板、会话header及main保留实色背景，输入框与用户消息共用输入区底色，卡片沿所属主题。共享 Web 使用自身的窗口布局。
 
 设置通过[独立浮窗](#设置浮窗)合成，主页面保持挂载以保留草稿、阅读位置和面板状态。
 
-Windows 10、Windows 11 与实色回退使用相同的三栏圆角外框和 40px 独立顶栏。顶栏显示后，`.native-window-content` 与顶栏底边相接，两侧和底部各留 6px。内部 `.client-content-frame` 宽高占满、外边距为 0，左侧导航和右侧工具仍沿原分隔线开合和调宽。工作区内的标题和收展按钮不重复计算外层留白。[设置浮窗](#设置浮窗)沿独立视图尺寸渲染。macOS 保持 0px 外留白和直角铺满。
+Windows 10、Windows 11 与实色回退采用相同的满宽工作区。包含标题与会话操作的 40px 顶栏下方，`.native-window-content` 与 `.client-panels` 铺到窗口两侧和底部。左侧导航和右侧工具沿分隔线开合和调宽，启动页保留原留白，[设置浮窗](#设置浮窗)沿独立视图尺寸渲染。外框与材质的取舍见 [Windows 工作区布局](../../.agents/notes/implemented/feature/2026-11-28-windows-flush-workspace.md)。
 
-生产样式浏览器回归在 800px 和 1280px 窗宽、深浅主题和宽窗右栏开合状态下，对照 Mica、Acrylic 与实色分支的顶栏、外框、导航、会话和右栏几何。三种分支的尺寸和描边相同，只有玻璃分支为导航启用背景模糊。[侧栏浏览器回归](test/isolated/sidebar-actions-browser.test.ts)
+生产样式浏览器回归在 800px 和 1280px 窗宽、深浅主题和宽窗右栏开合状态下，对照 Mica、Acrylic 与实色分支的顶栏、外框、导航、会话和右栏几何。三种分支的尺寸相同。导航背景、会话背景都延伸到各自上方的顶栏区域，工作区外沿无描边。Mica 和 Acrylic 分支在导航背景层启用模糊。[侧栏浏览器回归](test/isolated/sidebar-actions-browser.test.ts)
+
+2026-11-28，Windows x64／Electron 44.3.0，在独立 Mica 窗口逐步核对 1100px 深色和 800px 浅色界面。实际窗口截图取样确认两块背景在顶栏上下分别同色，应用操作和系统按钮之间仅有 1px 竖线。左栏开合期间，背景交界与面板边缘逐帧对齐，调宽后仍贴合。点击环境信息、标签页及双击标题继续生效，页面缩放 80%／100%／125% 时分隔线仍处于系统按钮留位之前。浏览器夹具覆盖 Mica、Acrylic 与实色的样式对照及导航动画。
+
+2026-11-28，Windows x64／Electron 44.3.0，`eea8bd270` 加本次样式。在关闭诊断的独立 Mica 窗口和配套 Service 中，1100px 深色与 800px 浅色窗口的工作区均从 y=40px 铺到窗口边缘。顶栏与主内容底色对应为 `#181818` 和 `#fafafa`。观察左栏关合、重新展开和鼠标调宽时，工作区四边稳定，草稿与原阅读位置保持。右栏本地 Markdown 预览在窄窗收起，恢复宽窗后显示原文件。三种材质的布局对照和预览几何回归随原测试通过，Acrylic 与实色的对照范围为生产样式浏览器夹具。
 
 2026-11-25，Windows x64 build 26300／Electron 44.3.0 的隔离 Root 在 `63de7c773` 加本次变更上运行旧版 Acrylic 路径，核对 DWM 接受自有窗口句柄、拒绝无效句柄，窗体调宽、最大化还原和隐藏重显仍可用。实色回退时 Root 样本与实色内容一致。屏幕取样未可靠验证后方窗口颜色透出，Windows 10 原生合成和安装版仍待实机验证。Chromium 额外核对两个窗口宽度、深浅主题和减少透明共 40 组样式，Windows 三种材质的工作区尺寸与描边一致。当前工作树 `d758976dc` 加本次变更的 [Root](test/isolated/native-root-window.test.ts)和[窗口 IPC](test/native-window-ipc.test.ts)共 19 项通过，覆盖版本分支、系统重查、窗口重显和实色恢复。后续修复覆盖同名的两个基线失败。[Windows 启动负例](test/isolated/windows-node-access.test.ts)补全 Electron 协议桩并核对缺交接时预览 scheme 注册、路径读取、原生模块加载、factory 和子进程启动均为零。[窗口操作 DOM](test/isolated/native-window-actions-dom.test.tsx)提供真实形状的草稿读写回执，核对缩放失败 Toast、草稿保留、切换设置后的迟到失败、菜单准入及两级 Escape。Windows Node-API 与交接回归共 14 项通过，窗口、菜单、IPC 与设置宿主回归共 15 项通过。
 
-Windows `.sidebar-header` 的左／右内边距分别为16／10px，使 Kite 标题与主要导航、空间图标的左边缘对齐。桌面共用收展按钮的展开位置消费同一 `--sidebar-header-end-padding`，收起位置消费标题起始内边距；Windows 与 Vibrancy 沿用内容顶部定位，Windows 收起位置随统一外框保留 6px 左留白，macOS 收起位置避让原窗口按钮区。按钮位于共享面板边界的零宽轨道，不受导航200px最小内容宽度的裁切，窗口拖动排除仍由 `no-drag` 保持。macOS 收起后按钮覆盖会话 header 内的 `.session-sidebar-toggle` 占位，该占位同样声明 `no-drag`，使原生拖拽区域明确扣除按钮所在位置；只给外部按钮声明 `no-drag` 仍可能被 header 的拖拽区域截获。
+Windows `.sidebar-header` 的左／右内边距分别为16／10px，使 Kite 标题与主要导航、空间图标的左边缘对齐。桌面共用收展按钮的展开位置消费同一 `--sidebar-header-end-padding`，收起位置消费标题起始内边距；Windows 与 Vibrancy 沿用内容顶部定位，macOS 收起位置避让原窗口按钮区。按钮位于共享面板边界的零宽轨道，不受导航200px最小内容宽度的裁切，窗口拖动排除仍由 `no-drag` 保持。macOS 收起后按钮覆盖会话 header 内的 `.session-sidebar-toggle` 占位，该占位同样声明 `no-drag`，使原生拖拽区域明确扣除按钮所在位置；只给外部按钮声明 `no-drag` 仍可能被 header 的拖拽区域截获。
 
-玻璃导航的 `.sidebar-header` 不再单独添加顶部材质间距，`--native-panel-inset` 统一为0；Windows 的 6px 留白由最外层提供，macOS继续为0。Windows 标题行取消共享48px最小高度，由品牌内容和顶部10px内边距撑开，主导航顶部外边距沿共享8px；品牌、侧栏按钮、会话标题与操作按钮共用垂直中心。收展按钮两种状态均沿原 `--sidebar-toggle-top` 在最外层Group内定位，不再重复计入材质留白。macOS／Linux 沿共享48px标题高度居中。2026-10-23 的隔离浏览器加载当前生产 CSS 与标题结构，深浅主题、Mica／实色、1200／600px八组测得四处中心相同，侧栏收起与恢复时按钮中心不变；标题行随28／40px内容行高增为42／54px，主导航间距保持8px。该证据只覆盖浏览器布局，不代替完整 Electron 窗口交互或原生材质合成验收；2026-10-19 旧52px标题行的历史几何结果不作为当前自适应标题行的验收依据。
+玻璃导航的 `.sidebar-header` 不再单独添加顶部材质间距，`--native-panel-inset` 统一为 0。Windows 标题行取消共享48px最小高度，由品牌内容和顶部10px内边距撑开，主导航顶部外边距沿共享8px；品牌、侧栏按钮、会话标题与操作按钮共用垂直中心。收展按钮两种状态均沿原 `--sidebar-toggle-top` 在最外层Group内定位，不再重复计入材质留白。macOS／Linux 沿共享48px标题高度居中。2026-10-23 的隔离浏览器加载当前生产 CSS 与标题结构，深浅主题、Mica／实色、1200／600px八组测得四处中心相同，侧栏收起与恢复时按钮中心不变；标题行随28／40px内容行高增为42／54px，主导航间距保持8px。该证据只覆盖浏览器布局，不代替完整 Electron 窗口交互或原生材质合成验收；2026-10-19 旧52px标题行的历史几何结果不作为当前自适应标题行的验收依据。
 
 2026-10-25，macOS／Electron44.3.0：隔离 `hiddenInset` 窗口以系统鼠标事件复现收起后按钮不接收 pointerdown／click，而DOM点击仍能展开；占位排除拖拽后，系统点击可反复收展，邻近标题空白仍能原生拖窗。当前48px header与32px按钮保持。浏览器窗口回归同时核深浅主题下占位完整覆盖按钮、header仍为drag、占位为no-drag；CDP点击仅验证DOM交互，系统鼠标证据单独核实，未重验正式安装包。
 
-Native 的会话标题栏左内边距仅在共享Group的 `data-animate-width=true` 时跟随180ms过渡，与[共享标题占位](../../packages/ui/src/desktop/SessionPage.tsx)及macOS窗口按钮安全间距同步；Windows 的 6px 外留白固定在最外层，内部面板不再动画调整独立外边距；手动调宽沿原事件关闭动画，减少动画偏好统一直接切换。2026-10-19 Windows x64／Electron44.3.0 的隔离实际组件与编译样式逐帧对照：原Windows Mica侧栏收起的标题反向跳动为50px，实色为44px，macOS样式标记为108px；修复后1086px可用宽度的反向偏移小于0.1px、垂直位移为0。786px紧凑布局另核深浅主题、有／无右侧按钮、实色及macOS样式，减少动画偏好另核五组，反向及垂直位移均为0。页面／侧栏／定时任务／Native新对话／后台五个整文件60项、1041断言和UI／Desktop类型检查通过；平台标记只验证样式，不代证其他平台原生窗口或安装资格。
+Native 的会话标题栏左内边距仅在共享Group的 `data-animate-width=true` 时跟随180ms过渡，与[共享标题占位](../../packages/ui/src/desktop/SessionPage.tsx)及macOS窗口按钮安全间距同步；内部面板在工作区边界内调整，手动调宽沿原事件关闭动画，减少动画偏好统一直接切换。2026-10-19 Windows x64／Electron44.3.0 的隔离实际组件与编译样式逐帧对照：原Windows Mica侧栏收起的标题反向跳动为50px，实色为44px，macOS样式标记为108px；修复后1086px可用宽度的反向偏移小于0.1px、垂直位移为0。786px紧凑布局另核深浅主题、有／无右侧按钮、实色及macOS样式，减少动画偏好另核五组，反向及垂直位移均为0。页面／侧栏／定时任务／Native新对话／后台五个整文件60项、1041断言和UI／Desktop类型检查通过；平台标记只验证样式，不代证其他平台原生窗口或安装资格。
 
-Windows 分隔条在实时 `aria-valuenow=0` 时立即归零、关闭过渡的规则，只用于 Group 未进行程序动画的直接调宽。按钮收展仍沿共享分隔条过渡，避免快速反向切换时提前撤掉1px占位；原指针／键盘调宽事件先结束程序动画，因此按住拖到0会立即释放分隔条占位，最外层6px留白始终保持，同次按住反向展开继续可用。
+Windows 分隔条在实时 `aria-valuenow=0` 时立即归零、关闭过渡的规则，只用于 Group 未进行程序动画的直接调宽。按钮收展仍沿共享分隔条过渡，避免快速反向切换时提前撤掉1px占位；原指针／键盘调宽事件先结束程序动画，因此按住拖到0会立即释放分隔条占位，同次按住反向展开继续可用。
 
 同日基于 `f734245a` 加当前未提交源码，当时的临时验证入口（`wide-verified`） 构建运行，再以 `compact-verified --width=800 --skip-build`、`reduced-verified --reduce --skip-build` 复用同一构建。隔离 Electron44.3.0 实窗加载实际 SessionPage、Conversation、Composer、NativeWindowFrame 与编译样式，独立用户目录、沙箱保持开启。1086／786px可用宽度及减少动画模式共36组，每组24次快速切换，共864次切换请求，另含同帧重复点击和最终状态校准；5795份位置采样包含逐帧跟踪与点击前后核对。修前 Mica 的面板与标题过渡相差约1px；修后标题、正文和输入框的非预期反向／垂直位移、点击瞬间突跳及滚动漂移均为0，节点、草稿、保存宽度与最终按钮／ARIA／inert 状态保持。键盘 Home 收起及 Chromium 输入事件保持按下拖到0后反向展开，18组均通过。420px上限经面板库按可用宽度换算，最终恢复宽度与初始值最多差0.532px，保存值仍为420；该边界核连续性、方向和最终状态，不假定归一化动画进度完全一致。上述五个完整测试文件本轮重跑60项／1041断言通过，定向CSS检查通过；这是本机组件布局与输入证据，未复验真实Service、完整安装包或其他平台原生材质。本机原始证据已缺失。
 
@@ -857,9 +891,9 @@ Windows 分隔条在实时 `aria-valuenow=0` 时立即归零、关闭过渡的�
 
 同环境此前圆角与分界验证（统一圆角前）：亮／暗主题下四周留白均为6px，面板y=38、高738px（viewport782）；实际PNG的圆角切口、留白和未聚焦的调宽分隔均为alpha0，面板内部为255。实际Playwright键盘与鼠标调宽、聚焦把手的可见环、收展动画结束后的6px左留白均通过；500×720窄窗口面板为x=6、y=38、宽488、高676，无整页溢出。后续设置覆盖调整复用该次主面板与调宽证据；当前圆角值和本轮窗口验证见下文。此检查核renderer交互与绘制层，不提升未取得的安装或其他平台资格。
 
-共享 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx) 的外观由 [Native CSS](src/native-tailwind.css) 管理。会话工具、文件变更、宿主详情和定时任务编辑在同一 `.client-content-frame` 内与阅读区等高，右栏是共同内容面中的一个区域；开合只重新分配内部宽度，接缝保留单一左边框。唯一外沿描边由更外层布局包住左栏、阅读区和最右侧，内部阅读区与右栏不分别形成圆角外框。提供商／MCP／Skills 设置编辑栏继续沿原900px断点并排或覆盖，使用原独立宿主和外侧留白，覆盖时仍与设置内容等高。两类布局复用主题变量，关闭、滚动、焦点与读取生命周期保持。
+共享 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx) 的外观由 [Native CSS](src/native-tailwind.css) 管理。会话工具、文件变更、宿主详情和定时任务编辑在同一 `.client-content-frame` 内与阅读区等高，右栏是共同内容面中的一个区域；开合只重新分配内部宽度，接缝保留单一左边框。Windows 左栏、阅读区和右栏共享固定的窗口边界。提供商／MCP／Skills 设置编辑栏继续沿原900px断点并排或覆盖，使用原独立宿主和外侧留白，覆盖时仍与设置内容等高。两类布局复用主题变量，关闭、滚动、焦点与读取生命周期保持。
 
-[左栏背景](src/native-navigation-material.css)在 Main 报告 Mica、Acrylic 或 Vibrancy 时生效：`.client-sidebar-panel` 与设置 `.settings-sidebar` 各绘制一层主题灰色，深色为55%的 `#1f1f1f`、浅色为60%的 `#fafafa`，使用24px的 `backdrop-filter`；内部header和列表保持透明，避免重复叠色。左栏控件、字体和业务内容沿原样式；右栏的 `--page-background` 等颜色由上述共同外框提供，玻璃叠层不进入右栏。原生材质仍由系统合成，renderer不读取壁纸或创建额外窗口。无材质分支保持原实色；减少透明时左栏使用对应不透明灰，强制颜色时使用Canvas并关闭模糊。左栏、主区和右栏共用最外层圆角与裁切，Windows边界覆盖全部三栏且四周统一6px留白，内部主区不再单独装饰，macOS保持原有直角铺满；浏览器协议和 Native View 均沿现有几何来源运行。
+[左栏背景](src/native-navigation-material.css)在 Main 报告 Mica、Acrylic 或 Vibrancy 时生效：Windows 会话窗口的连续导航背景与 macOS `.client-sidebar-panel`、设置 `.settings-sidebar` 各绘制一层主题灰色，深色为 55% 的 `#1f1f1f`，浅色为 60% 的 `#fafafa`，使用 24px 的 `backdrop-filter`；内部header和列表保持透明，避免重复叠色。左栏控件、字体和业务内容沿原样式；右栏的 `--page-background` 等颜色由上述共同外框提供，玻璃叠层不进入右栏。原生材质仍由系统合成，renderer不读取壁纸或创建额外窗口。无材质分支保持原实色；减少透明时左栏使用对应不透明灰，强制颜色时使用Canvas并关闭模糊。Windows 的三栏沿共同工作区裁切并铺到窗口边缘。浏览器协议和 Native View 均沿现有几何来源运行。
 
 2026-11-06，三栏整体协调阶段，Windows x64／Bun1.4.4，`5d39518e1` 加本轮差量：`bun test` 分别执行[Native面板DOM](test/isolated/native-browser-pane-dom.test.tsx)与[布局桥](test/native-browser-bridge.test.ts)两个整文件，67项／595断言通过，包含外层6px与内层0px的唯一计量、CSS与旧几何不一致时等待及恢复；Desktop typecheck核1278文件通过，实际Native组件与生产CSS重编通过。隔离浏览器逐步观察深浅主题切换、左栏收展、右栏新标签／变更切换、调宽到433px主区后恢复、设置编辑栏打开／取消及返回：原草稿和用户／助手各一条消息保持，无重复文字或旧页面透出，页面无异常。1280×720视口内最外层为(6,38)、1268×676，标题栏下方四周均6px，唯一外层圆角16px；内部内容框margin、圆角和阴影均为0／none，且无独立描边。主区和右栏深色均RGB31、浅色均RGB250；输入框和用户消息深色均RGB49、浅色均RGB255。左侧玻璃和右栏原字号保持。无材质分支padding为0，macOS样式标记另核0留白、直角及无外阴影／描边。本项覆盖隔离浏览器的实际组件与CSS操作，不代替完整安装版Electron、系统材质最终合成或实际Native View裁切资格；原协议定义、版本及宿主材质选择未改。本机原始证据已缺失。
 
@@ -867,7 +901,7 @@ Windows 分隔条在实时 `aria-valuenow=0` 时立即归零、关闭过渡的�
 
 2026-10-18 Windows x64、Bun 1.4.3，在 `f734245a` 加本次布局改动上，定向 `bun test --parallel=1 --max-concurrency=1` 的 Native 设置／新会话与共享页面／定时任务七个文件共136项、1823断言通过。隔离模拟桥夹具编译实际 Native 与共享 SessionPage，Chrome 155.0.8059.82 无界面检查72组几何状态：明暗主题、Windows／macOS／实色回退的 CSS 标记、设置400–1600px窗口及900px断点两侧、三类会话右栏和左侧导航收展均核等高与接缝；键盘调宽、分隔条上下边界及关闭后留白恢复通过，页面零异常。CSS Biome、文档结构／影响检查通过；未运行实际 Service、macOS／Linux 原生窗口或正式安装制品，不以 CSS 标记检查替代这些资格。
 
-最外层1px淡边缘位于左栏、实色主区与工具栏之上，不接收指针或增加占位尺寸；会话使用既有导航／工作区Group，设置使用既有Grid容器，不增加第三套分栏。内部接缝分别由导航分隔条与右栏左边框承担。[NativeBrowserPane](src/native-browser-pane.tsx)读取 `.native-window-content` 的实际padding，沿原 `NativeBrowserLayout.groups` 的left／right表达外层留白；内层读取原内容frame的实际margin，当前为0。CSS与实测几何不一致时等待下一次有效测量，不拿旧尺寸伪装新布局；协议定义及版本不变。macOS不绘制外沿描边。分栏和动画仍由[共享UI](../../packages/ui/README.md#原桌面展示层)负责，原共同内容框的布局理由及本次装饰归属见[共同外框记录](../../.agents/notes/implemented/bug-fix/2026-10-20-session-content-frame.md)。
+会话使用既有导航／工作区 Group，设置使用既有 Grid 容器。内部接缝分别由导航分隔条与右栏左边框承担。[NativeBrowserPane](src/native-browser-pane.tsx)读取 `.native-window-content` 的实际padding，沿原 `NativeBrowserLayout.groups` 的left／right表达外层留白；内层读取原内容frame的实际margin，当前会话工作区的外层 padding 和内层 margin 均为 0。CSS与实测几何不一致时等待下一次有效测量，不拿旧尺寸伪装新布局；协议定义及版本不变。macOS不绘制外沿描边。分栏和动画仍由[共享UI](../../packages/ui/README.md#原桌面展示层)负责，原共同内容框的布局理由及本次装饰归属见[共同外框记录](../../.agents/notes/implemented/bug-fix/2026-10-20-session-content-frame.md)。
 
 2026-10-18 Windows x64／Bun 1.4.3／Chrome 155.0.8059.82，在 `f734245a` 加本次修复上，隔离夹具加载实际 SessionPage 及当前 Vite 编译样式：100%／150%缩放下三类右栏共60组开合逐帧检查，左栏的物理像素边界保持稳定，最大 CSS 量化差为1/64px；修复前同类场景曾短暂偏移约113px。真实鼠标将右栏调宽80px，左栏位移为0；键盘调宽、动画中切入调宽、快速反向开合、左栏收展恢复和减少动画设置通过。亮暗主题在标题及正文左边缘均读到描边像素，macOS CSS 标记仍为无描边。定向 `bun test --parallel=1 --max-concurrency=1` 的共享页面、定时任务和 Native 新会话三个文件46项／713断言、UI typecheck及定向Biome通过；未复验真实 Service、原生壁纸合成或其他平台实窗。
 
@@ -884,6 +918,8 @@ macOS 复用上述玻璃透明层、左栏灰色叠层、设置遮盖、导航�
 2026-10-15 macOS 26.7.1／Electron 44.3.0／Bun 1.4.2，内容铺满调整前的隔离实际 Main／preload／普通 renderer 与配套 Service 的13种状态核对通过：原桥返回 `vibrancy`，亮暗主题经原用户菜单切换后透明承载层保持透明，NativeImage 中导航空白 alpha为0、正文为255；向原主面板注入洋红底色后，设置左栏与原主面板重叠区域仍为alpha0，右侧内容为255。侧栏收展、键盘调宽、550／400px窄侧栏和设置往返保留草稿，顶部 header仍从y=0开始，原生按钮位置和窗口可调宽保持，页面无异常。另核 Mica 与 `none` 的 CSS 适用边界；窗口 IPC、窗口动作 DOM、启动 DOM 三个完整文件9项／155断言、Desktop typecheck、定向 Biome 和文档检查通过。此证据覆盖宿主接线和 renderer 透明层，未核系统壁纸最终合成或切换系统辅助功能设置。
 
 ## 交互状态与透明材质
+
+会话标题的键盘焦点框绘制在整行内缘，与悬停和选中背景共用边界。Tab 聚焦行尾更多按钮时显示按钮自身的焦点框，按 Esc 关闭菜单后焦点回到该按钮。2026-11-28 在 150% 显示缩放的 Windows 实窗以深浅主题核对方向键移动、Tab 与 Shift+Tab、Enter 打开菜单或会话、Esc 关闭菜单及鼠标点击。 [共享样式](../../packages/ui/src/desktop/style.css)
 
 Native消费[UI共享语义色](../../packages/ui/README.md#原桌面展示层)的深浅两套红、暖橙、绿、蓝和紫：应用确认及提供商删除按钮使用独立实色填充阶，提供商错误／成功／信息提示使用对应文字、边框与底色；未读提醒、浏览器标注及错误页图标沿信息蓝色。实际网页中的[可信浏览器装饰](electron/browser-decoration.ts)使用同族中蓝固定值，2px内框及白描边光标在网页深浅底色上保持可见，不读取网页主题或引入新的执行权限。权限确认、操作准入、取消与原数据身份保持；组件配色验证与适用范围归上述UI owner。
 

@@ -721,7 +721,7 @@ async function openChild(carrierId: string, final = false) {
   );
 }
 async function returnFromChild() {
-  await page!.getByRole('button', { name: '收起标签栏', exact: true }).click();
+  await page!.getByRole('button', { name: '标签页', exact: true }).click();
   const hide = page!.getByRole('button', { name: '隐藏环境信息', exact: true });
   if (await hide.isVisible()) await hide.click();
 }

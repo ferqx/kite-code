@@ -385,6 +385,7 @@ function NativeDesktopContent({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarHost, setSidebarHost] = useState<HTMLDivElement | null>(null);
   const [searchHost, setSearchHost] = useState<HTMLDivElement | null>(null);
+  const [sessionHeaderHost, setSessionHeaderHost] = useState<HTMLDivElement | null>(null);
   const settingsPort = nativeWindow ? window.kiteNativeSettings : undefined;
   const [toolsOpen, setToolsOpen] = useState(false);
   const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
@@ -7119,6 +7120,7 @@ function NativeDesktopContent({
       ...(turnId ? outputFiles.turnOutputFacts(selection?.session.id, turnId) : []),
     ];
   };
+  const windowsTitlebar = nativeWindow && document.documentElement.dataset.platform === 'windows';
   const windowFrame = (content: ReactNode) =>
     nativeWindow ? (
       <NativeWindowFrame
@@ -7126,6 +7128,7 @@ function NativeDesktopContent({
         navigation={{
           sidebarHost: setSidebarHost,
           searchHost: setSearchHost,
+          sessionHeaderHost: windowsTitlebar ? setSessionHeaderHost : undefined,
           back: pageHistoryAction(-1),
           forward: pageHistoryAction(1),
         }}
@@ -7258,7 +7261,7 @@ function NativeDesktopContent({
           ? {
               sidebar: sidebarHost,
               search: searchHost,
-              searchInSidebarHeader: document.documentElement.dataset.platform === 'windows',
+              sessionHeader: windowsTitlebar ? sessionHeaderHost : undefined,
             }
           : undefined
       }

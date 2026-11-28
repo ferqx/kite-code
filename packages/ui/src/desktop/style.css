@@ -2256,16 +2256,26 @@ body {
   opacity: 0;
   pointer-events: none;
 }
-.kite-client .space-heading:is([data-menu-active], :hover, :focus-within) > .sidebar-actions,
-.kite-client .session-heading:is([data-menu-active], :hover) > .sidebar-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
 .kite-client
-  .session-heading:is([data-menu-active], :hover):has(> .sidebar-actions)
-  > .session-row
-  > [data-slot="spinner"] {
-  visibility: hidden;
+  :is(
+    .space-heading:is([data-menu-active], :hover, :focus-within),
+    .session-heading:is(
+      [data-menu-active],
+      :hover,
+      :has(
+        > .sidebar-actions
+          > .session-more:focus-visible:where(:root:not([data-input-modality="pointer"]) *)
+      )
+    )
+  ) {
+  > .sidebar-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  &:has(> .sidebar-actions) > .session-row > [data-slot="spinner"] {
+    visibility: hidden;
+  }
 }
 @media (hover: none) {
   .kite-client :where(:not(.session-heading)) > .sidebar-actions {
@@ -2273,9 +2283,20 @@ body {
     pointer-events: auto;
   }
 }
-.kite-client .session-heading:has(.session-more:focus-visible) {
-  outline: 1px solid var(--ring);
-  outline-offset: -1px;
+.kite-client
+  .session-heading:has(> .session-row:focus-visible):where(
+    :root:not([data-input-modality="pointer"]) *
+  ),
+.kite-client
+  .session-heading
+  .session-more:focus-visible:where(:root:not([data-input-modality="pointer"]) *) {
+  outline: 2px solid var(--foreground, CanvasText);
+  outline-offset: -2px;
+  box-shadow: none;
+}
+.kite-client .session-heading > .session-row:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 .kite-client
   :where(.space-new-session, .space-more, .session-more):disabled:not([data-read-gated="true"]) {
@@ -5954,9 +5975,9 @@ body {
     transform: translateX(calc(100% + 16px));
   }
 }
-.kite-client .environment-information-toggle[aria-expanded="true"],
+.kite-client :is(.environment-information-toggle, .session-tabs-toggle)[aria-expanded="true"],
 .kite-client
-  .environment-information-toggle[aria-expanded="true"]:hover:is(
+  :is(.environment-information-toggle, .session-tabs-toggle)[aria-expanded="true"]:hover:is(
     :not(:disabled),
     [data-read-gated="true"]
   ) {
@@ -6988,7 +7009,6 @@ body {
   max-width: min(100%, 192px);
   height: 32px;
   padding-inline-end: 3px;
-  border: 1px solid transparent;
   border-radius: var(--button-radius);
   color: var(--muted-foreground);
 }
@@ -6997,7 +7017,6 @@ body {
   color: var(--foreground);
 }
 .kite-client .session-tab[data-active="true"] {
-  border-color: color-mix(in srgb, var(--foreground) 16%, transparent);
   background: var(--control-selected);
   color: var(--foreground);
 }

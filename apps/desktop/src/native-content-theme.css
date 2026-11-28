@@ -1,5 +1,9 @@
 /* The shared content frame owns colors; conversation typography stays local.
  * Navigation keeps its own theme and glass tint. */
+[data-theme="dark"] {
+  --native-content-dark-background: #181818;
+}
+
 .kite-client .client-content-frame {
   --control-hover: color-mix(in srgb, var(--foreground) 5%, transparent);
   --control-selected: color-mix(in srgb, var(--foreground) 7%, transparent);
@@ -32,7 +36,7 @@
 }
 
 [data-theme="dark"] .kite-client .client-content-frame {
-  --background: #181818;
+  --background: var(--native-content-dark-background);
   --page-background: var(--background);
   --card: #222;
   --composer-background: #262626;
@@ -199,6 +203,11 @@
 .kite-client .client-main-panel .typeset-chat tbody tr + tr :where(th, td) {
   border-block-start: 1px solid var(--input);
 }
+.kite-client .client-main-panel form.composer {
+  box-shadow: none;
+  transition-property: border-color;
+}
+
 .kite-client .client-main-panel .prompt-editor {
   font-size: var(--ui-text-size);
   line-height: 30px;

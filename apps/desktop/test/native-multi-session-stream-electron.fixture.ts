@@ -289,13 +289,13 @@ try {
         : page.locator('.history-panel .conversation').innerText();
     async function close(index: number) {
       try {
-        await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+        await page.getByRole('button', { name: '标签页', exact: true }).click();
       } catch (cause) {
         console.error(
           'multi_close_geometry',
           JSON.stringify({
             probe: await page.evaluate(() => {
-              const button = document.querySelector('[aria-label="收起标签栏"]');
+              const button = document.querySelector('button[aria-label="标签页"]');
               const box = button?.getBoundingClientRect();
               return {
                 connected: button?.isConnected,

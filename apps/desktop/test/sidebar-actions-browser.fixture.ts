@@ -18,10 +18,47 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
       const back = bar.getByRole('button', { name: '后退', exact: true });
       const forward = bar.getByRole('button', { name: '前进', exact: true });
       const toggle = bar.locator('.sidebar-toggle');
-      const search = page.getByRole('button', { name: '搜索会话', exact: true });
-      const sidebarHeader = page.locator('#navigation .sidebar-header');
-      const sidebarSearch = sidebarHeader.getByRole('button', { name: '搜索会话', exact: true });
-      const titlebarSearch = bar.getByRole('button', { name: '搜索会话', exact: true });
+      const search = bar.getByRole('button', { name: '搜索会话', exact: true });
+      const layout = page.locator('#client-layout');
+      const titlebarAlignment = () =>
+        bar.locator('.session-header-heading').evaluate((heading) => {
+          const divider = getComputedStyle(heading, '::before');
+          return {
+            title: heading.querySelector('strong')!.getBoundingClientRect().left,
+            divider: heading.getBoundingClientRect().left + Number.parseFloat(divider.left),
+            width: divider.width,
+          };
+        });
+      const macTitlebarLayout = () =>
+        bar.evaluate((toolbar) => {
+          const header = document.querySelector('.client-main-panel > .session-header')!;
+          const heading = header.querySelector('.breadcrumb strong')!.getBoundingClientRect();
+          const search = toolbar.querySelector('.session-search-trigger')!.getBoundingClientRect();
+          const divider = getComputedStyle(toolbar, '::after');
+          const toolbarLeft = toolbar.getBoundingClientRect().left;
+          const dividerLeft = toolbarLeft + Number.parseFloat(divider.left);
+          const dividerRight = dividerLeft + Number.parseFloat(divider.width);
+          const headerStyle = getComputedStyle(header);
+          const actions = [...header.querySelectorAll(':scope > button')].map((button) =>
+            button.getBoundingClientRect(),
+          );
+          return {
+            title: heading.left,
+            headerHeight: header.getBoundingClientRect().height,
+            outline: headerStyle.boxShadow,
+            actionGap: [
+              actions[1]!.left - actions[0]!.right,
+              header.getBoundingClientRect().right - actions.at(-1)!.right,
+            ],
+            divider:
+              divider.content === 'none'
+                ? null
+                : {
+                    dimensions: [divider.width, divider.height, divider.marginBlockStart],
+                    gaps: [dividerLeft - search.right, heading.left - dividerRight],
+                  },
+          };
+        });
       const draft = page.locator('.composer .prompt-editor');
       const title = page.locator('.breadcrumb strong');
       const content = (id: string) => page.getByText(`Question ${id}`, { exact: true });
@@ -29,39 +66,21 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
       await expect(draft).toBeEditable();
       await expect(back).toBeDisabled();
       await expect(forward).toBeDisabled();
+      await expect(search).toBeVisible();
       if (platform === 'windows') {
-        await expect(sidebarSearch).toBeVisible();
-        const placement = await sidebarHeader.evaluate((node) => {
-          const brand = node.querySelector('.brand')!.getBoundingClientRect();
-          const search = node.querySelector('button')!.getBoundingClientRect();
-          const boundary = node.getBoundingClientRect();
-          return {
-            afterBrand: search.left >= brand.right,
-            centered: search.top + search.height / 2 === brand.top + brand.height / 2,
-            inset: boundary.right - search.right,
-            size: [search.width, search.height],
-          };
-        });
-        assert.deepEqual(placement, {
-          afterBrand: true,
-          centered: true,
-          inset: 10,
-          size: [28, 28],
-        });
-        await sidebarHeader.screenshot({ path: path.join(artifact, 'windows-sidebar-search.png') });
-        await sidebarSearch.click();
-        await expect(sidebarSearch).toHaveAttribute('aria-expanded', 'true');
+        await search.press('Enter');
+        await expect(search).toHaveAttribute('aria-expanded', 'true');
         await page.evaluate(() => window.dismissFixtureSearch?.());
-        await expect(sidebarSearch).toBeFocused();
-      } else {
-        await expect(titlebarSearch).toBeVisible();
+        await expect(search).toBeFocused();
       }
       await draft.fill('Draft stays with A');
       await page.locator('.conversation').evaluate((node) => {
         node.scrollTop = 0;
       });
       const before = await bar.evaluate((node) => {
-        const buttons = [...node.querySelectorAll('button')].map((button) => {
+        const buttons = [
+          ...node.querySelectorAll(':scope > button, nav button, .native-window-search button'),
+        ].map((button) => {
           const { x, y, width, height } = button.getBoundingClientRect();
           const icon = button.querySelector('svg')?.getBoundingClientRect();
           const style = getComputedStyle(button);
@@ -75,7 +94,6 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
             iconSize: icon ? [icon.width, icon.height] : undefined,
             iconCenterY: icon ? icon.y + icon.height / 2 : undefined,
             iconInlineInset: icon ? [icon.left - x, x + width - icon.right] : undefined,
-            fontSize: style.fontSize,
             appRegion: style.getPropertyValue('-webkit-app-region'),
           };
         });
@@ -83,10 +101,15 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
         const add = document.querySelector('.nav-label .space-add')!;
         const addBounds = add.getBoundingClientRect();
         const addIcon = add.querySelector('svg')!.getBoundingClientRect();
+        const sidebar = document.querySelector('#navigation')!.getBoundingClientRect();
         return {
           buttons,
           top: node.getBoundingClientRect().top,
           bottom: node.getBoundingClientRect().bottom,
+          sidebarInsets: {
+            start: buttons[0]!.x - sidebar.left,
+            end: sidebar.right - buttons.at(-1)!.right,
+          },
           contentTop: document
             .querySelector('.native-window-content > .kite-client.shell')!
             .getBoundingClientRect().top,
@@ -99,7 +122,7 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
       assert.deepEqual(
         before.buttons.map(({ name }) => name),
         platform === 'windows'
-          ? ['文件', '编辑', '视图', '帮助', '收起侧栏', '后退', '前进']
+          ? ['应用菜单', '收起侧栏', '后退', '前进', '搜索会话']
           : ['收起侧栏', '后退', '前进', '搜索会话'],
       );
       const rowY = before.buttons[0]!.centerY;
@@ -109,8 +132,7 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
         ),
       );
       assert.equal(before.drag, 'drag');
-      const iconButtons = before.buttons.filter(({ iconSize }) => iconSize !== undefined);
-      assert.equal(iconButtons.length, platform === 'windows' ? 3 : 4);
+      const iconButtons = before.buttons;
       for (const button of iconButtons) {
         assert.deepEqual(button.iconSize, [14, 14]);
         assert.deepEqual(button.size, before.addProjectSize);
@@ -128,12 +150,19 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
           assert.equal(button.y - before.top, 6);
           assert.equal(before.contentTop - button.y - button.size[1]!, 6);
         }
-        const menuButtons = before.buttons.filter(({ iconSize }) => iconSize === undefined);
-        assert.equal(menuButtons.length, 4);
-        for (const button of menuButtons) assert.equal(button.fontSize, '14px');
-        const adjacent = [menuButtons[3]!, ...iconButtons];
-        for (let index = 1; index < adjacent.length; index++)
-          assert.equal(adjacent[index]!.x - adjacent[index - 1]!.right, 8);
+        for (let index = 1; index < iconButtons.length; index++)
+          assert.equal(iconButtons[index]!.x - iconButtons[index - 1]!.right, 11);
+        const { start, end } = before.sidebarInsets;
+        assert.ok(Math.abs(start - end) < 0.5);
+      }
+      const expandedAlignment = platform === 'windows' ? await titlebarAlignment() : undefined;
+      let collapsedAlignment: Awaited<ReturnType<typeof titlebarAlignment>> | undefined;
+      const macExpanded = platform === 'macos' ? await macTitlebarLayout() : undefined;
+      if (macExpanded) {
+        assert.equal(macExpanded.divider, null);
+        assert.equal(macExpanded.headerHeight, 48);
+        assert.deepEqual(macExpanded.actionGap, [8, 8]);
+        assert.match(macExpanded.outline, /-1px.*inset/);
       }
       await bar.screenshot({ path: path.join(artifact, `page-navigation-${platform}.png`) });
 
@@ -144,17 +173,38 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
           searchCount: number;
           titlebarSearch: boolean;
           sidebarWidth: number;
+          navigationSurfaceWidth: number;
           sidebarOpen: boolean;
           searchRight: number;
           titleLeft: number;
+          contentLeft: number;
+          underlineLeft: number;
+          dividerLeft: number;
+          dividerWidth: number;
           rows: string[];
         }[] = [];
         const tick = () => {
           const title = document.querySelector('.breadcrumb strong');
           const toggle = document.querySelector('.native-window-titlebar .sidebar-toggle');
           const sidebar = document.querySelector('#navigation');
+          const windowFrame = document.querySelector('.native-window-frame');
+          const toolbar = document.querySelector('.native-window-titlebar');
+          const heading = document.querySelector('.session-header-heading');
+          const content = document.querySelector('.client-content-frame');
+          const windowContent = document.querySelector('.native-window-content');
           const searches = document.querySelectorAll('button[aria-label="搜索会话"]');
-          if (title && toggle && sidebar) {
+          if (
+            title &&
+            toggle &&
+            sidebar &&
+            windowFrame &&
+            toolbar &&
+            heading &&
+            content &&
+            windowContent
+          ) {
+            const divider = getComputedStyle(heading, '::before');
+            const underline = getComputedStyle(windowContent, '::after');
             const rows = [...document.querySelectorAll('.conversation')].flatMap(
               (node) => (node.textContent ?? '').match(/Question [ab]/g) ?? [],
             );
@@ -164,29 +214,42 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
               searchCount: searches.length,
               titlebarSearch: !!searches[0]?.closest('.native-window-titlebar'),
               sidebarWidth: sidebar.getBoundingClientRect().width,
+              navigationSurfaceWidth: Number.parseFloat(
+                getComputedStyle(windowFrame, '::after').width,
+              ),
               sidebarOpen: toggle.getAttribute('aria-expanded') === 'true',
               searchRight: searches[0]?.getBoundingClientRect().right ?? 0,
               titleLeft: title.getBoundingClientRect().left,
+              contentLeft: content.getBoundingClientRect().left,
+              underlineLeft: Number.parseFloat(underline.left),
+              dividerLeft: heading.getBoundingClientRect().left + Number.parseFloat(divider.left),
+              dividerWidth: Number.parseFloat(divider.width),
               rows,
             });
           }
-          frame = requestAnimationFrame(tick);
+          frame = requestAnimationFrame(afterLayout);
         };
-        let frame = requestAnimationFrame(tick);
+        let timer: number | undefined;
+        // Sample the painted position after the titlebar's ResizeObserver has run.
+        const afterLayout = () => {
+          timer = window.setTimeout(tick, 0);
+        };
+        let frame = requestAnimationFrame(afterLayout);
         Reflect.set(window, 'navigationFrames', () => {
           cancelAnimationFrame(frame);
+          clearTimeout(timer);
           return frames;
         });
       });
       if (platform === 'windows') {
-        // The search must follow the actual transition even if its duration changes.
+        // Keep the transition long enough to check the search before the sidebar settles.
         await page.locator('.kite-client.shell').evaluate((shell) => {
           (shell as HTMLElement).style.setProperty('--sidebar-motion-duration', '420ms');
         });
       }
       await toggle.click();
       await expect(toggle).toHaveAccessibleName('展开侧栏');
-      await expect(titlebarSearch).toBeVisible();
+      await expect(search).toBeVisible();
       await expect(toggle).toBeFocused();
       await search.click();
       await expect(search).toHaveAttribute('aria-expanded', 'true');
@@ -195,10 +258,62 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
       await page.evaluate(() => window.dismissFixtureSearch?.());
       await expect(search).toHaveAttribute('aria-expanded', 'false');
       await expect(search).toBeFocused();
+      if (expandedAlignment) {
+        await expect(layout).not.toHaveAttribute('data-animate-width', 'true');
+        collapsedAlignment = await titlebarAlignment();
+        assert.equal(collapsedAlignment.divider, 200);
+        assert.ok(Math.abs(collapsedAlignment.title - expandedAlignment.title) < 0.5);
+        const separators = await bar.evaluate((toolbar) => {
+          const session = toolbar.querySelector('.native-window-session')!;
+          const heading = session.querySelector('.session-header-heading')!;
+          const left = getComputedStyle(heading, '::before');
+          const right = getComputedStyle(session, '::after');
+          const style = (divider: CSSStyleDeclaration) => [
+            divider.height,
+            divider.marginBlockStart,
+            divider.borderLeftWidth,
+            divider.borderLeftColor,
+          ];
+          const actions = [...session.querySelectorAll('.session-header > button')];
+          const lastAction = actions.at(-1)!.getBoundingClientRect();
+          const dividerRight =
+            session.getBoundingClientRect().right - Number.parseFloat(right.right);
+          const captionStart = toolbar.getBoundingClientRect().right - 144;
+          return {
+            left: style(left),
+            right: style(right),
+            gaps: [
+              dividerRight - Number.parseFloat(right.width) - lastAction.right,
+              captionStart - dividerRight,
+            ],
+          };
+        });
+        assert.deepEqual(separators.left, separators.right);
+        assert.deepEqual(separators.left.slice(0, 3), ['18px', '11px', '1px']);
+        assert.deepEqual(separators.gaps, [8, 8]);
+        await bar.screenshot({
+          path: path.join(artifact, 'page-navigation-windows-collapsed.png'),
+        });
+      }
+      if (macExpanded) {
+        await expect(layout).not.toHaveAttribute('data-animate-width', 'true');
+        const macCollapsed = await macTitlebarLayout();
+        assert.equal(macCollapsed.title, macExpanded.title);
+        assert.deepEqual(macCollapsed.actionGap, [8, 8]);
+        assert.deepEqual(macCollapsed.divider, {
+          dimensions: ['1px', '18px', '15px'],
+          gaps: [8, 8],
+        });
+        await page.screenshot({
+          path: path.join(artifact, 'page-navigation-macos-collapsed.png'),
+          clip: { x: 0, y: 0, width: 800, height: 48 },
+        });
+      }
       await toggle.click();
       await expect(toggle).toHaveAccessibleName('收起侧栏');
       if (platform === 'windows') {
-        await expect(sidebarSearch).toBeVisible();
+        await expect(layout).not.toHaveAttribute('data-animate-width', 'true');
+        await expect(search).toBeVisible();
         await expect(toggle).toBeFocused();
         const openWidth = await page.locator('#navigation').evaluate((sidebar) => {
           return sidebar.getBoundingClientRect().width;
@@ -208,10 +323,10 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
           const current = document.querySelector('#navigation')?.getBoundingClientRect().width;
           return current !== undefined && current > 0 && current < width - 1;
         }, openWidth);
-        await expect(titlebarSearch).toHaveCount(0);
+        await expect(search).toBeVisible();
         await toggle.click();
-        await expect(sidebarSearch).toBeVisible();
-        await expect(titlebarSearch).toHaveCount(0);
+        await expect(search).toBeVisible();
+        await expect(layout).not.toHaveAttribute('data-animate-width', 'true');
       }
       await page.getByRole('button', { name: 'Session B', exact: true }).click();
       await expect(content('b')).toBeVisible();
@@ -248,27 +363,38 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
         searchCount: number;
         titlebarSearch: boolean;
         sidebarWidth: number;
+        navigationSurfaceWidth: number;
         sidebarOpen: boolean;
         searchRight: number;
         titleLeft: number;
+        contentLeft: number;
+        underlineLeft: number;
+        dividerLeft: number;
+        dividerWidth: number;
         rows: string[];
       }[];
       assert.ok(frames.length > 10);
       if (platform === 'windows') {
         assert.ok(frames.some((frame) => !frame.sidebarOpen && frame.sidebarWidth > 0));
-        assert.ok(frames.some((frame) => frame.titlebarSearch));
+        assert.ok(frames.some((frame) => frame.sidebarWidth === 0));
       }
+      const sidebarToggleX = before.buttons.find(({ name }) => name === '收起侧栏')!.x;
+      const searchRight = before.buttons.find(({ name }) => name === '搜索会话')!.right;
       for (const frame of frames) {
-        assert.equal(frame.x, iconButtons[0]!.x);
-        if (platform === 'macos') {
-          assert.equal(frame.searchCount, 1);
-          assert.ok(frame.titleLeft >= frame.searchRight);
-        } else {
-          assert.ok(frame.searchCount <= 1);
-          if (frame.titlebarSearch) {
-            assert.equal(frame.sidebarWidth, 0);
-            assert.equal(frame.sidebarOpen, false);
-          }
+        assert.equal(frame.x, sidebarToggleX);
+        assert.equal(frame.searchCount, 1);
+        assert.equal(frame.titlebarSearch, true);
+        assert.equal(frame.searchRight, searchRight);
+        assert.ok(frame.titleLeft >= frame.searchRight);
+        if (expandedAlignment) {
+          assert.ok(Math.abs(frame.navigationSurfaceWidth - frame.sidebarWidth) < 0.05);
+          assert.ok(
+            Math.abs(frame.titleLeft - expandedAlignment.title) < 0.5,
+            JSON.stringify(frame),
+          );
+          assert.ok(Math.abs(frame.dividerLeft - expandedAlignment.divider) < 0.5);
+          assert.equal(frame.dividerWidth, Number.parseFloat(expandedAlignment.width));
+          assert.ok(Math.abs(frame.underlineLeft - frame.contentLeft) < 0.05);
         }
         const expected =
           frame.title === 'Session A'
@@ -282,16 +408,53 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
       await expect(content('a')).toBeVisible();
       await expect(back).toBeDisabled();
       await expect(forward).toBeDisabled();
-      if (platform === 'windows') {
+      if (collapsedAlignment) {
         await page.emulateMedia({ reducedMotion: 'reduce' });
+        const grip = (await page.locator('#navigation-resize').boundingBox())!;
+        await page.mouse.move(grip.x + grip.width / 2, grip.y + 100);
+        await page.mouse.down();
+        await page.mouse.move(grip.x + 48, grip.y + 100, { steps: 8 });
+        await page.mouse.up();
+        await expect.poll(async () => (await titlebarAlignment()).title).toBeGreaterThan(250);
+        const resizedAlignment = await titlebarAlignment();
         await toggle.click();
-        await expect(titlebarSearch).toBeVisible();
+        await expect(search).toBeVisible();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(layout).not.toHaveAttribute('data-animate-width', 'true');
+        await expect.poll(titlebarAlignment).toEqual(collapsedAlignment);
         assert.equal(
           await page.locator('#navigation').evaluate((sidebar) => sidebar.getAnimations().length),
           0,
         );
         await toggle.click();
-        await expect(sidebarSearch).toBeVisible();
+        await expect(search).toBeVisible();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+        await expect(layout).not.toHaveAttribute('data-animate-width', 'true');
+        const reopenedAlignment = await titlebarAlignment();
+        assert.ok(Math.abs(reopenedAlignment.title - resizedAlignment.title) < 1);
+        assert.ok(Math.abs(reopenedAlignment.divider - resizedAlignment.divider) < 1);
+      }
+      if (macExpanded) {
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        const grip = (await page.locator('#navigation-resize').boundingBox())!;
+        await page.mouse.move(grip.x + grip.width / 2, grip.y + 100);
+        await page.mouse.down();
+        await page.mouse.move(grip.x + 100, grip.y + 100, { steps: 8 });
+        await page.mouse.up();
+        await expect.poll(async () => (await macTitlebarLayout()).title).toBeGreaterThan(300);
+        const resized = await macTitlebarLayout();
+        await toggle.click();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(layout).not.toHaveAttribute('data-animate-width', 'true');
+        const collapsed = await macTitlebarLayout();
+        assert.equal(collapsed.title, macExpanded.title);
+        assert.deepEqual(collapsed.divider?.gaps, [8, 8]);
+        await toggle.click();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+        await expect(layout).not.toHaveAttribute('data-animate-width', 'true');
+        const reopened = await macTitlebarLayout();
+        assert.ok(Math.abs(reopened.title - resized.title) < 1);
+        assert.equal(reopened.divider, null);
       }
       assert.deepEqual(errors, []);
       cases.push({ platform, before, frames, errors });
@@ -416,18 +579,30 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       await page.waitForFunction(
         () => document.activeElement?.getAttribute('aria-label') === 'Session B 更多操作',
       );
-      assert.equal(await menuOpacity('Session B'), 0);
+      assert.equal(await menuOpacity('Session B'), 1);
       await row('Session A').focus();
       await page.keyboard.press('ArrowDown');
       assert.equal(
         await row('Session B').evaluate((node) => node === document.activeElement),
         true,
       );
+      const focusedHeading = page.locator('.session-heading').filter({ has: row('Session B') });
+      await expect(focusedHeading).toHaveCSS('outline-width', '2px');
+      await expect(focusedHeading).toHaveCSS('outline-offset', '-2px');
+      await expect(row('Session B')).toHaveCSS('outline-style', 'none');
+      assert.equal(await menuOpacity('Session B'), 0);
+      assert.equal(await rowElement('Session A').getAttribute('aria-current'), 'page');
+      await focusedHeading.screenshot({
+        path: path.join(artifact, `session-row-focus-${colorScheme}.png`),
+      });
       await page.keyboard.press('Tab');
       assert.equal(
         await menu('Session B').evaluate((node) => node === document.activeElement),
         true,
       );
+      assert.equal(await menuOpacity('Session B'), 1);
+      await expect(focusedHeading).toHaveCSS('outline-style', 'none');
+      await expect(menu('Session B')).toHaveCSS('outline-offset', '-2px');
       await page.keyboard.press('Enter');
       await panel.waitFor();
       assert.deepEqual(await panel.getByRole('menuitem').allTextContents(), ['重命名', '删除']);
@@ -487,7 +662,7 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       await release('session-mutation');
       await row('Renamed B').waitFor();
       await rename.waitFor({ state: 'hidden' });
-      assert.equal(await page.locator('.native-toast-card').count(), 0);
+      assert.deepEqual(await page.locator('.native-toast-card').allTextContents(), []);
       assert.equal(
         await page.evaluate(() => Reflect.get(window, 'finishRenameToastSample')()),
         undefined,
@@ -533,7 +708,8 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       await pending('session-lookup');
       await release('session-lookup');
       await lookup.waitFor({ state: 'hidden' });
-      await page.locator('.native-toast-card').getByText('已请求删除会话。').waitFor();
+      await expect(rowElement('Renamed B')).toHaveCount(0);
+      await expect(page.locator('.native-toast-card')).toHaveCount(0);
       const observed = await page.evaluate(() => {
         const sample = Reflect.get(window, 'sessionFrames');
         sample.done = true;
@@ -677,7 +853,11 @@ async function verifySessionRowLoading(page: Page) {
   await expect(moreIcon).toHaveCSS('color', colors.muted);
   await page.keyboard.press('Escape');
   await menu.waitFor({ state: 'hidden' });
-  phases.push(await sample('menu closed', true, false));
+  await expect(more).toBeFocused();
+  phases.push(await sample('menu closed and trigger focused', false, true));
+  await page.keyboard.press('Shift+Tab');
+  await expect(row).toBeFocused();
+  phases.push(await sample('session focused', true, false));
   return phases;
 }
 
@@ -706,14 +886,28 @@ async function verifyWindowsBackdropLayout(page: Page, url: string) {
       });
       const modes = (['mica', 'acrylic', 'none'] as const).map((material) => {
         html.dataset.windowMaterial = material;
+        const workspace = getComputedStyle(panels[1]!);
+        const navigationPanel = panels[2]!.closest('#navigation')!;
+        const windowFrame = panels[0]!.parentElement!;
+        const navigationSurface = getComputedStyle(windowFrame, '::after');
+        const contentSurface = getComputedStyle(windowFrame, '::before');
         return {
           material,
           layout: panels.map((panel) => {
             const { x, y, width, height } = panel.getBoundingClientRect();
             return [x, y, width, height];
           }),
-          navigationBlur: getComputedStyle(panels[2]!).backdropFilter,
-          outline: getComputedStyle(panels[1]!, '::after').borderTopWidth,
+          navigationBlur: navigationSurface.backdropFilter,
+          navigationWidth: navigationPanel.getBoundingClientRect().width,
+          navigationSurfaceWidth: Number.parseFloat(navigationSurface.width),
+          contentSurfaceLeft: Number.parseFloat(contentSurface.left),
+          toolbarBackground: getComputedStyle(panels[0]!).backgroundColor,
+          sidebarBackground: getComputedStyle(panels[2]!).backgroundColor,
+          contentSurfaceBackground: contentSurface.backgroundColor,
+          contentBackground: getComputedStyle(panels[3]!).backgroundColor,
+          radius: workspace.borderRadius,
+          shadow: workspace.boxShadow,
+          outline: getComputedStyle(panels[1]!, '::after').content,
         };
       });
       html.dataset.windowMaterial = previousMaterial;
@@ -723,10 +917,77 @@ async function verifyWindowsBackdropLayout(page: Page, url: string) {
     const modes = await measure();
     const mica = modes[0]!;
     assert.deepEqual(mica.layout[0], [0, 0, width, 40]);
-    assert.deepEqual(mica.layout[1], [6, 40, width - 12, 804]);
+    assert.deepEqual(mica.layout[1], [0, 40, width, 810]);
+    const header = page.locator('.native-window-titlebar .session-header');
+    await expect(header.locator('.breadcrumb strong')).toBeVisible();
+    await expect(page.locator('.client-main-panel .session-header')).toHaveCount(0);
+    const headerGeometry = await header.evaluate((node) => {
+      const title = node.querySelector('strong')!.getBoundingClientRect();
+      const actions = [...node.querySelectorAll<HTMLButtonElement>('button')].map((button) => {
+        const { height, right, top } = button.getBoundingClientRect();
+        return {
+          right,
+          center: top + height / 2,
+          region: getComputedStyle(button).getPropertyValue('-webkit-app-region'),
+        };
+      });
+      const panel = document.querySelector<HTMLElement>('.client-main-panel')!;
+      const host = node.parentElement!;
+      const separator = getComputedStyle(host, '::after');
+      const toolbar = host.parentElement!;
+      const underline = getComputedStyle(toolbar.nextElementSibling!, '::after');
+      const heading = node.querySelector('.session-header-heading')!;
+      const divider = getComputedStyle(heading, '::before');
+      const resizeGrip = getComputedStyle(document.querySelector('#navigation-resize')!);
+      const contentLeft = panel.getBoundingClientRect().left;
+      const navigationRight = document.querySelector('#navigation')!.getBoundingClientRect().right;
+      return {
+        y: title.top + title.height / 2,
+        actions,
+        contentOffset: panel.style.getPropertyValue('--session-header-height'),
+        background: getComputedStyle(host).backgroundColor,
+        separator: [separator.height, separator.right, separator.borderLeftWidth],
+        titleInset: title.left - contentLeft,
+        divider: [divider.top, divider.bottom, divider.height, divider.width],
+        dividerOffset:
+          heading.getBoundingClientRect().left + Number.parseFloat(divider.left) - navigationRight,
+        dividerMatchesResizeGrip: divider.backgroundColor === resizeGrip.backgroundColor,
+        underline: [
+          Number.parseFloat(underline.left) - contentLeft,
+          underline.bottom,
+          underline.borderBottomWidth,
+        ],
+      };
+    });
+    assert.equal(headerGeometry.y, 20);
+    assert.equal(headerGeometry.contentOffset, '0px');
+    assert.equal(headerGeometry.background, 'rgba(0, 0, 0, 0)');
+    assert.deepEqual(headerGeometry.separator, ['18px', '-9px', '1px']);
+    assert.deepEqual(headerGeometry.divider, ['0px', '0px', '40px', '1px']);
+    assert.ok(Math.abs(headerGeometry.dividerOffset) < 0.05, JSON.stringify(headerGeometry));
+    assert.equal(headerGeometry.dividerMatchesResizeGrip, true);
+    assert.ok(Math.abs(headerGeometry.titleInset - 16) < 0.05);
+    assert.equal(headerGeometry.underline[1], '810px');
+    assert.equal(headerGeometry.underline[2], '1px');
+    assert.ok(Math.abs(Number(headerGeometry.underline[0])) < 0.05);
+    assert.ok(headerGeometry.actions.length > 0);
+    assert.ok(
+      headerGeometry.actions.every(
+        ({ right, center, region }) =>
+          right <= width - 144 && center === 20 && region === 'no-drag',
+      ),
+    );
     for (const mode of modes) {
       assert.deepEqual(mode.layout, mica.layout, `${width}px ${mode.material}`);
-      assert.equal(mode.outline, '1px');
+      assert.equal(mode.radius, '0px');
+      assert.equal(mode.shadow, 'none');
+      assert.equal(mode.outline, 'none');
+      assert.notEqual(mode.contentBackground, 'rgba(0, 0, 0, 0)');
+      assert.equal(mode.toolbarBackground, 'rgba(0, 0, 0, 0)');
+      assert.equal(mode.sidebarBackground, 'rgba(0, 0, 0, 0)');
+      assert.equal(mode.contentSurfaceBackground, mode.contentBackground);
+      assert.ok(Math.abs(mode.navigationSurfaceWidth - mode.navigationWidth) < 0.05);
+      assert.ok(Math.abs(mode.contentSurfaceLeft - mode.navigationWidth) < 0.05);
       assert.equal(mode.navigationBlur === 'none', mode.material === 'none');
     }
     return modes;
@@ -736,14 +997,34 @@ async function verifyWindowsBackdropLayout(page: Page, url: string) {
     results.push({ width, detailsOpen: false, modes: await verifyLayout(width) });
     if (width === 1280) {
       const tabs = page.getByRole('button', { name: '标签页', exact: true });
+      const tabsAppearance = () =>
+        tabs.evaluate((button) => ({
+          background: getComputedStyle(button).backgroundColor,
+          icon: button.querySelector('svg')!.innerHTML,
+        }));
+      const closedAppearance = await tabsAppearance();
       await tabs.click();
       await expect(tabs).toHaveAttribute('aria-expanded', 'true');
+      await expect(page.locator('#session-tabs .right-sidebar-close')).toHaveCount(0);
+      const selectedTab = page.getByRole('tab', { selected: true });
+      const activeChip = page.locator('#session-tabs .session-tab[data-active="true"]');
+      await expect(activeChip).toHaveCSS('border-top-width', '0px');
+      await expect(activeChip).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      await selectedTab.press('ArrowLeft');
+      await expect(selectedTab).toHaveCSS('outline-width', '2px');
       await expect
         .poll(async () => (await page.locator('#details').boundingBox())?.width)
         .toBeGreaterThan(0);
       results.push({ width, detailsOpen: true, modes: await verifyLayout(width) });
+      await page.mouse.move(600, 300);
+      const openAppearance = await tabsAppearance();
+      assert.notEqual(openAppearance.icon, closedAppearance.icon);
+      assert.notEqual(openAppearance.background, closedAppearance.background);
       await tabs.click();
       await expect(tabs).toHaveAttribute('aria-expanded', 'false');
+      await expect(tabs).toBeFocused();
+      await page.mouse.move(600, 300);
+      await expect.poll(tabsAppearance).toEqual(closedAppearance);
     }
   }
   return results;

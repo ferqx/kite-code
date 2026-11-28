@@ -423,7 +423,7 @@ try {
     mounted: 1,
     closed: 0,
   });
-  await rail.getByRole('button', { name: '收起标签栏' }).click();
+  await page.getByRole('button', { name: '标签页', exact: true }).click();
   await page.waitForFunction(() => window.browserTabsFixture.readers().closed === 1);
   assert.deepEqual(await page.evaluate(() => window.browserTabsFixture.readers()), {
     mounted: 1,
@@ -772,7 +772,7 @@ try {
   assert.equal(await rail.getByRole('alert').count(), 0);
   assert.deepEqual(await layout(), beforeClose);
   manyTabs.delete(`${origin}/tab-10`);
-  await rail.getByRole('button', { name: '收起标签栏' }).click();
+  await page.getByRole('button', { name: '标签页', exact: true }).click();
   await rail.waitFor({ state: 'hidden' });
   await page.reload();
   await page.waitForFunction(() => !!window.browserTabsFixture);

@@ -1245,7 +1245,7 @@ async function runFinalResultsOnly() {
     );
     assert.ok(activeName.trim());
     await shot('08-active-child-result-detail', active);
-    await page!.getByRole('button', { name: '收起标签栏', exact: true }).click();
+    await page!.getByRole('button', { name: '标签页', exact: true }).click();
     await agentOperationAudit('finish');
     await release('active-parent-result');
     scenarios.active = await until(
@@ -1462,7 +1462,7 @@ try {
       );
       await assertOriginalChildTask(childCompressed);
       await shot('21-child-postcompression-original-task', childCompressed);
-      await page!.getByRole('button', { name: '收起标签栏', exact: true }).click();
+      await page!.getByRole('button', { name: '标签页', exact: true }).click();
       await release('active-child-postcompression');
       checks.realChildCompressionKeepsOriginalAgentAssignment = true;
     }
@@ -1551,7 +1551,7 @@ try {
     );
     assert.equal(await bubbles().count(), 0);
     await shot('08-active-child-result-detail', activeReceived);
-    await page!.getByRole('button', { name: '收起标签栏', exact: true }).click();
+    await page!.getByRole('button', { name: '标签页', exact: true }).click();
     checks.activeChildResultDetailVisible = true;
     await sendSteers();
     await assertSteers(await read(), false);

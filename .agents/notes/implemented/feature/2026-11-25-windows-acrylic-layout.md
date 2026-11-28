@@ -19,3 +19,5 @@ Windows 的 6px 外沿、32px 独立顶栏和三栏共用外框由平台样式�
 ## Consequences
 
 通过运行时动态查找旧版本 DWM 的 accent policy 接口获得 Acrylic，效果依赖系统对该兼容路径的实现。接口不可用时沿用实色窗口和相同工作区几何。本轮的 Windows 11 原生窗口对照与渲染几何验证见 [Desktop owner](../../../../apps/desktop/README.md#windows-原生-mica)，Windows 10 原生合成与安装制品的实机资格待验证。
+
+2026-11-28 的 [Windows 工作区布局](./2026-11-28-windows-flush-workspace.md)替代共同圆角外框和顶栏材质的展示规则。三个分支共用几何、左栏继续按系统选择材质，原系统能力检查和回退路径保持有效。

@@ -25,3 +25,5 @@ Status: implemented
 用户行为归[桌面手册](../../../../docs/handbook/clients/desktop/README.md#配置编辑交互)，布局与验证归[UI owner](../../../../packages/ui/README.md#原桌面展示层)和[Native owner](../../../../apps/desktop/README.md#windows-原生-mica)。本机原生夹具验证与其他平台 CSS 标记核对不能提升为正式安装包或其他系统原生合成资格。
 
 2026-11-25 的 [Windows 版本共用外框决定](../feature/2026-11-25-windows-acrylic-layout.md)将 Windows 外沿扩大到 Acrylic 和实色模式。共同外框的三栏归属与阅读／工具联动取舍仍适用。
+
+2026-11-28 的 [Windows 工作区布局](../feature/2026-11-28-windows-flush-workspace.md)替代上述 Windows 外沿留白、圆角、描边和阴影。两层分栏、共同裁切、内部接缝及阅读／工具联动取舍继续适用。

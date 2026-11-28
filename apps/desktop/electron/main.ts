@@ -858,7 +858,7 @@ void app
         rendererUrl,
         platform: process.platform,
         showMenu(host, request) {
-          const menu = Menu.buildFromTemplate(
+          const applicationMenu = Menu.buildFromTemplate(
             nativeWindowMenuTemplate({
               ...menuOptions,
               applicationEnabled:
@@ -869,7 +869,11 @@ void app
                 !sessionSearch.active() &&
                 !settings.active(),
             }),
-          ).getMenuItemById(request.menu)!.submenu!;
+          );
+          const menu =
+            request.menu === 'application'
+              ? applicationMenu
+              : applicationMenu.getMenuItemById(request.menu)!.submenu!;
           return new Promise<void>((resolve) =>
             menu.popup({
               window: host,

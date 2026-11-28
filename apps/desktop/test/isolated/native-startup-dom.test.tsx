@@ -156,7 +156,7 @@ test('retained startup hides the entire product until admitted attach and the co
     expect(f.host.querySelector('.shell')).toBeNull();
     expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBeNull();
     expect(f.host.querySelector('.native-window-titlebar')).toBeNull();
-    expect(f.host.querySelector('[role="menubar"]')).toBeNull();
+    expect(f.host.querySelector('button[aria-label="应用菜单"]')).toBeNull();
     await act(async () => {
       f.dom.window.dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'F10' }));
       f.dom.window.dispatchEvent(
@@ -188,11 +188,7 @@ test('retained startup hides the entire product until admitted attach and the co
     expect(f.host.querySelector('main[aria-label="Kite 启动页"]')).toBeNull();
     expect(f.host.querySelector('.kite-client.shell')).not.toBeNull();
     expect(f.host.querySelector('.native-window-titlebar')).not.toBeNull();
-    expect(
-      [...f.host.querySelectorAll('[role="menubar"] [role="menuitem"]')].map(
-        (item) => item.textContent,
-      ),
-    ).toEqual(['文件', '编辑', '视图', '帮助']);
+    expect(f.host.querySelectorAll('button[aria-label="应用菜单"]')).toHaveLength(1);
     expect(f.host.querySelector('[role="textbox"][aria-label="新对话草稿"]')).not.toBeNull();
     expect(f.host.querySelector('.connection')).toBeNull();
     expect(f.host.querySelector('input[aria-label="先审核计划"]')).toBeNull();

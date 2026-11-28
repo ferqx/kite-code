@@ -1,49 +1,61 @@
 /* Tint each navigation host once; its transparent children retain native glass. */
+html[data-native-window] {
+  --native-navigation-surface: var(--sidebar);
+  --native-navigation-filter: none;
+}
+
 html[data-native-window]:is(
-    [data-window-material="mica"],
-    [data-window-material="acrylic"],
-    [data-window-material="vibrancy"]
-  ) .kite-client
-  :is(.client-sidebar-panel, .settings-sidebar) {
+  [data-window-material="mica"],
+  [data-window-material="acrylic"],
+  [data-window-material="vibrancy"]
+) {
   --native-navigation-gray: #fafafa;
-  --native-navigation-tint: color-mix(in srgb, var(--native-navigation-gray) 60%, transparent);
-  background: var(--native-navigation-tint);
-  backdrop-filter: blur(24px) saturate(110%);
+  --native-navigation-surface: color-mix(
+    in srgb,
+    var(--native-navigation-gray) var(--native-navigation-opacity, 60%),
+    transparent
+  );
+  --native-navigation-filter: blur(24px) saturate(110%);
 }
 
 html[data-native-window][data-theme="dark"]:is(
+  [data-window-material="mica"],
+  [data-window-material="acrylic"],
+  [data-window-material="vibrancy"]
+) {
+  --native-navigation-gray: #1f1f1f;
+  --native-navigation-opacity: 55%;
+}
+
+html[data-native-window]:is(
     [data-window-material="mica"],
     [data-window-material="acrylic"],
     [data-window-material="vibrancy"]
   )
   .kite-client
   :is(.client-sidebar-panel, .settings-sidebar) {
-  --native-navigation-gray: #1f1f1f;
-  --native-navigation-tint: color-mix(in srgb, var(--native-navigation-gray) 55%, transparent);
+  background: var(--native-navigation-surface);
+  backdrop-filter: var(--native-navigation-filter);
 }
 
 @media (prefers-reduced-transparency: reduce) {
   html[data-native-window]:is(
-      [data-window-material="mica"],
-      [data-window-material="acrylic"],
-      [data-window-material="vibrancy"]
-    )
-    .kite-client
-    :is(.client-sidebar-panel, .settings-sidebar) {
-    background: var(--native-navigation-gray);
-    backdrop-filter: none;
+    [data-window-material="mica"],
+    [data-window-material="acrylic"],
+    [data-window-material="vibrancy"]
+  ) {
+    --native-navigation-surface: var(--native-navigation-gray);
+    --native-navigation-filter: none;
   }
 }
 
 @media (forced-colors: active) {
   html[data-native-window]:is(
-      [data-window-material="mica"],
-      [data-window-material="acrylic"],
-      [data-window-material="vibrancy"]
-    )
-    .kite-client
-    :is(.client-sidebar-panel, .settings-sidebar) {
-    background: Canvas;
-    backdrop-filter: none;
+    [data-window-material="mica"],
+    [data-window-material="acrylic"],
+    [data-window-material="vibrancy"]
+  ) {
+    --native-navigation-surface: Canvas;
+    --native-navigation-filter: none;
   }
 }

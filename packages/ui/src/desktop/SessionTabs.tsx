@@ -9,7 +9,6 @@ import {
   Flowchart01Icon,
   Globe02Icon,
   MoreHorizontalIcon,
-  PanelRightCloseIcon,
   PencilEdit02Icon,
   RefreshIcon,
 } from '@hugeicons/core-free-icons';
@@ -126,7 +125,7 @@ type SessionTab =
     };
 type SessionTabsAction =
   | { readonly type: 'select' | 'close'; readonly id: string }
-  | { readonly type: 'add' | 'collapse' | 'retryRestore' | 'openChanges' };
+  | { readonly type: 'add' | 'retryRestore' | 'openChanges' };
 
 const tabIcons = {
   file: File01Icon,
@@ -697,15 +696,6 @@ function SessionTabsHeader({
       >
         <HugeiconsIcon icon={Add01Icon} />
       </Button>
-      <Button
-        className="ghost right-sidebar-close"
-        size="icon-sm"
-        aria-label="收起标签栏"
-        title="收起标签栏"
-        onClick={() => dispatch({ type: 'collapse' })}
-      >
-        <HugeiconsIcon icon={PanelRightCloseIcon} />
-      </Button>
     </header>
   );
 }
@@ -745,9 +735,6 @@ function dispatchTabsAction(
     }
     case 'add':
       owner.model.addBrowser();
-      break;
-    case 'collapse':
-      owner.onClose();
       break;
     case 'retryRestore':
       owner.model.retryRestore?.();

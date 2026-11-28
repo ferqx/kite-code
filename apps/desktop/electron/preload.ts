@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron';
 import { inputFileReference } from '../src/input-file-reference';
 import {
   decodeNativeEvent,
@@ -454,6 +454,7 @@ const bridge: NativeBridge &
     const reply = (await ipcRenderer.invoke(nativeClipboardChannel, { text })) as NativeReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
   },
+  getPageZoomFactor: () => webFrame.getZoomFactor(),
   async toggleWindowMaximize() {
     const reply = (await ipcRenderer.invoke(nativeWindowMaximizeChannel)) as NativeReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });

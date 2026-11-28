@@ -40,6 +40,25 @@ export async function verifyComposerHandoff(browser: Browser, url: string, artif
           ?.getAttribute('aria-label')
           ?.includes('%'),
       );
+      const composer = page.locator('form.composer');
+      const editor = composer.locator('.prompt-editor');
+      const readComposerStyle = () =>
+        composer.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return [style.boxShadow, style.borderTopWidth, style.borderTopColor];
+        });
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      const idle = await readComposerStyle();
+      assert.deepEqual(idle.slice(0, 2), ['none', '1px']);
+      await editor.focus();
+      await page.waitForFunction(
+        (border) =>
+          getComputedStyle(document.querySelector('form.composer')!).borderTopColor !== border,
+        idle[2],
+      );
+      const focused = await readComposerStyle();
+      assert.deepEqual(focused.slice(0, 2), ['none', '1px']);
+      await editor.blur();
       await page.evaluate(() => {
         const state = { phase: 'initial', frames: [] as unknown[] };
         Reflect.set(window, 'composerHandoffObservation', state);

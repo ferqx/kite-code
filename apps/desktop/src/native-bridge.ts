@@ -166,6 +166,7 @@ export interface NativeThemeBridge {
   setTheme(preference: NativeThemePreference): Promise<void>;
 }
 export interface NativeWindowBridge {
+  getPageZoomFactor?(): number;
   writeClipboardText(text: string): Promise<void>;
   toggleWindowMaximize(): Promise<void>;
   getWindowAppearance(): Promise<NativeWindowAppearance>;

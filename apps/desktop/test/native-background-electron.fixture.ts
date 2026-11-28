@@ -315,7 +315,7 @@ try {
     ),
     'retained child conversation renders the complete original Unicode body',
   );
-  await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+  await page.getByRole('button', { name: '标签页', exact: true }).click();
   await page.getByText('ORIGINAL_PARENT_DONE', { exact: true }).first().waitFor();
   assert.equal(
     (await count()).count,

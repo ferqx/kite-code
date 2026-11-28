@@ -789,7 +789,7 @@ test('ordinary sessions hide background aggregates for live, unknown and unavail
 });
 
 test('closing or collapsing a running child preserves saved parent messages before pending Tool metadata completes', async () => {
-  for (const target of ['关闭标签页：Live child', '收起标签栏']) {
+  for (const target of ['关闭标签页：Live child', '标签页']) {
     const f = fixture(true, true);
     f.runningParent();
     try {
@@ -1084,7 +1084,7 @@ test('the same child reuses its sidebar tab and switching to the browser retires
     expect(
       f.requests.filter((request) => request.method === 'background.child.open').length,
     ).toBeGreaterThan(opens);
-    await f.click('收起标签栏');
+    await f.click('标签页');
     expect(f.host.querySelector('.session-tab-child') === null).toBe(true);
     await f.click('标签页');
     await f.waitForText('Late tail after switching to browser');

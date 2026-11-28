@@ -3,6 +3,7 @@ import {
   PanelLeftCloseIcon,
   PanelLeftIcon,
   PanelLeftOpenIcon,
+  PanelRightCloseIcon,
   PanelRightIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
@@ -232,7 +233,8 @@ export interface SessionPageProps {
   windowNavigationHosts?: {
     sidebar: HTMLElement | null;
     search: HTMLElement | null;
-    searchInSidebarHeader?: boolean;
+    /** Null requests a window header that is still mounting. */
+    sessionHeader?: HTMLElement | null;
   };
   workspaces: readonly WorkspaceSummary[];
   selected?: string;
@@ -371,6 +373,7 @@ function SessionPageContent({
   // Keep evictable history outside props captured by persistent window listeners.
   const composerInput = useRef<PromptEditorHandle>(null);
   const headerElement = useRef<HTMLElement>(null);
+  const mainPanelElement = useRef<HTMLDivElement>(null);
   const footerElement = useRef<HTMLElement>(null);
   const focusComposerAfterCommit = useCallback(() => {
     const focus = () => {
@@ -382,9 +385,6 @@ function SessionPageContent({
   const [sidebarOpen, setSidebarOpenIntent] = useState(true);
   const [navigationAnimationTarget, setNavigationAnimationTarget] = useState<boolean>();
   const navigationAnimating = navigationAnimationTarget !== undefined;
-  const [sidebarHeaderSearchHost, setSidebarHeaderSearchHost] = useState<HTMLDivElement | null>(
-    null,
-  );
   const [detailsAnimation, setDetailsAnimation] = useState<{ scope?: string }>();
   const navigationWidth = useRef(savedNavigationWidth());
   const navigationPanel = useRef<PanelImperativeHandle>(null);
@@ -1313,30 +1313,17 @@ function SessionPageContent({
       />
     </Button>
   );
-  const windowSearchHost = props.windowNavigationHosts?.search;
-  const sidebarSearchHost = navigationAnimating
-    ? null
-    : sidebarOpen
-      ? sidebarHeaderSearchHost
-      : windowSearchHost;
   const sidebarPanel = (
     <div className="client-sidebar-panel">
       {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
       <header className="sidebar-header" onMouseDown={handleHeaderMouseDown}>
         <strong className="brand">Kite</strong>
-        {props.windowNavigationHosts?.searchInSidebarHeader && (
-          <div className="sidebar-header-search" ref={setSidebarHeaderSearchHost} />
-        )}
       </header>
       <aside className="sidebar" aria-label="项目与会话">
         <MemoizedSidebar
           workspaces={props.workspaces}
           sessionSearch={props.covered ? undefined : props.sessionSearch}
-          searchTriggerHost={
-            props.windowNavigationHosts?.searchInSidebarHeader
-              ? sidebarSearchHost
-              : windowSearchHost
-          }
+          searchTriggerHost={props.windowNavigationHosts?.search}
           selectedWorkspace={
             !props.workbench && !props.scheduledTasks && !props.sidebarSelected
               ? props.workspaces.find(
@@ -1485,28 +1472,29 @@ function SessionPageContent({
     : undefined;
   const hasComposer = !!props.composer;
   const headerSessionLabel = sessionHeaderLabel(props.sessionLabel);
+  const sessionHeaderHost = props.windowNavigationHosts?.sessionHeader;
+  const headerInWindow = sessionHeaderHost !== undefined;
   const headerOverlay = historyVisible && !welcoming && !props.beforeConversation;
   // biome-ignore lint/correctness/useExhaustiveDependencies: Scope and composer mounting change geometry before message layout effects resume.
   const prepareConversationLayout = useCallback(() => {
-    const header = headerElement.current;
-    const panel = header?.parentElement;
+    const panel = mainPanelElement.current;
+    if (!panel) return;
+    const height = headerElement.current?.getBoundingClientRect().height ?? 0;
     const footer = historyVisible ? footerElement.current : null;
-    if (!header || !panel) return;
-    const height = header.getBoundingClientRect().height;
-    if (height > 0) panel.style.setProperty('--session-header-height', `${height}px`);
+    if (headerInWindow || height > 0)
+      panel.style.setProperty('--session-header-height', `${headerInWindow ? 0 : height}px`);
     panel.style.setProperty(
       '--conversation-footer-height',
       `${footer?.getBoundingClientRect().height ?? 0}px`,
     );
-  }, [historyVisible, props.readingKey, hasComposer]);
+  }, [historyVisible, props.readingKey, hasComposer, headerInWindow]);
   useLayoutEffect(() => {
     const header = headerElement.current;
-    if (!header) return;
     const footer = historyVisible ? footerElement.current : null;
     prepareConversationLayout();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(prepareConversationLayout);
-    observer.observe(header, { box: 'border-box' });
+    if (header) observer.observe(header, { box: 'border-box' });
     if (footer) observer.observe(footer, { box: 'border-box' });
     return () => observer.disconnect();
   }, [historyVisible, prepareConversationLayout]);
@@ -1559,6 +1547,86 @@ function SessionPageContent({
       childSessionIdsByTaskId={props.childSessionIdsByTaskId}
       onOpenChildSession={props.onOpenChildSession}
     />
+  );
+  const tabsExpanded = tabsOpen && canShowDetails && !hostDetailsOpen && !props.covered;
+  const sessionHeader = (
+    // biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging.
+    <header
+      ref={headerInWindow ? undefined : headerElement}
+      className="session-header"
+      inert={headerInWindow && rightSidebarFormOpen && scheduledEditorOverlay}
+      onMouseDown={handleHeaderMouseDown}
+    >
+      <div className="session-header-heading">
+        {!props.windowNavigationHosts && (
+          <div className="session-sidebar-toggle" data-open={!sidebarOpen ? 'true' : undefined} />
+        )}
+        <div className="breadcrumb">
+          {props.scheduledTasks ? (
+            <strong>定时任务</strong>
+          ) : props.workbench ? (
+            <strong>工作台</strong>
+          ) : props.newConversation ? (
+            <strong>新对话</strong>
+          ) : headerSessionLabel === props.sessionLabel ? (
+            <strong>{props.sessionLabel}</strong>
+          ) : (
+            <strong>
+              <span aria-hidden="true">{headerSessionLabel}</span>
+              <span className="sr-only">{props.sessionLabel}</span>
+            </strong>
+          )}
+        </div>
+      </div>
+      {props.headerActions}
+      {props.environmentInformation && (
+        <Button
+          className="ghost environment-information-toggle"
+          size="icon-sm"
+          aria-expanded={environmentVisible}
+          aria-controls="session-environment-information"
+          aria-label={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
+          title={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
+          onClick={() => {
+            startEnvironmentAnimation();
+            setEnvironmentPreference(environmentVisible ? 'closed' : 'open');
+          }}
+        >
+          <HugeiconsIcon icon={ListIcon} />
+        </Button>
+      )}
+      {hasTabs && (
+        <Button
+          ref={tabsToggle}
+          className="ghost session-tabs-toggle"
+          aria-expanded={tabsExpanded}
+          size="icon-sm"
+          aria-label="标签页"
+          title={
+            dockFits
+              ? tabsExpanded
+                ? '收起标签栏'
+                : '展开标签栏'
+              : '拉宽窗口或收起左栏以显示标签页'
+          }
+          aria-controls="session-tabs"
+          onClick={() => {
+            if (tabsOpen && dockFits && !hostDetailsOpen) {
+              closeRightSidebar();
+              return;
+            }
+            if (tabModel.tabs.length === 0) tabModel.addBrowser();
+            props.detailPanel?.onClose();
+            changeTabsOpen(true);
+          }}
+        >
+          <HugeiconsIcon
+            icon={tabsExpanded ? PanelRightCloseIcon : PanelRightIcon}
+            aria-hidden="true"
+          />
+        </Button>
+      )}
+    </header>
   );
   return (
     <div
@@ -1684,76 +1752,16 @@ function SessionPageContent({
                 data-native-browser-layout={JSON.stringify(contentSizing)}
                 style={{ overflow: 'hidden' }}
               >
-                <div className="client-main-panel" data-header-overlay={headerOverlay || undefined}>
-                  {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
-                  <header
-                    ref={headerElement}
-                    className="session-header"
-                    onMouseDown={handleHeaderMouseDown}
-                  >
-                    <div className="session-header-heading">
-                      {!props.windowNavigationHosts && (
-                        <div
-                          className="session-sidebar-toggle"
-                          data-open={!sidebarOpen ? 'true' : undefined}
-                        />
-                      )}
-                      <div className="breadcrumb">
-                        {props.scheduledTasks ? (
-                          <strong>定时任务</strong>
-                        ) : props.workbench ? (
-                          <strong>工作台</strong>
-                        ) : props.newConversation ? (
-                          <strong>新对话</strong>
-                        ) : headerSessionLabel === props.sessionLabel ? (
-                          <strong>{props.sessionLabel}</strong>
-                        ) : (
-                          <strong>
-                            <span aria-hidden="true">{headerSessionLabel}</span>
-                            <span className="sr-only">{props.sessionLabel}</span>
-                          </strong>
-                        )}
-                      </div>
-                    </div>
-                    {props.headerActions}
-                    {props.environmentInformation && (
-                      <Button
-                        className="ghost environment-information-toggle"
-                        size="icon-sm"
-                        aria-expanded={environmentVisible}
-                        aria-controls="session-environment-information"
-                        aria-label={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
-                        title={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
-                        onClick={() => {
-                          startEnvironmentAnimation();
-                          setEnvironmentPreference(environmentVisible ? 'closed' : 'open');
-                        }}
-                      >
-                        <HugeiconsIcon icon={ListIcon} />
-                      </Button>
-                    )}
-                    {hasTabs && (
-                      <Button
-                        ref={tabsToggle}
-                        className="ghost"
-                        aria-expanded={tabsOpen && canShowDetails}
-                        size="icon-sm"
-                        aria-label="标签页"
-                        title={dockFits ? '标签页' : '拉宽窗口或收起左栏以显示标签页'}
-                        aria-controls="session-tabs"
-                        onClick={() => {
-                          const open = !tabsOpen || !dockFits;
-                          if (open) {
-                            if (tabModel.tabs.length === 0) tabModel.addBrowser();
-                            props.detailPanel?.onClose();
-                          }
-                          changeTabsOpen(open);
-                        }}
-                      >
-                        <HugeiconsIcon icon={PanelRightIcon} />
-                      </Button>
-                    )}
-                  </header>
+                <div
+                  ref={mainPanelElement}
+                  className="client-main-panel"
+                  data-header-overlay={headerOverlay || undefined}
+                >
+                  {headerInWindow
+                    ? sessionHeaderHost &&
+                      !props.covered &&
+                      createPortal(sessionHeader, sessionHeaderHost)
+                    : sessionHeader}
                   <main
                     className={
                       props.newConversation

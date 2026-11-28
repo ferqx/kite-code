@@ -60,7 +60,12 @@ function fixture(platform = 'win32', rendererUrl = 'file:///C:/kite/index.html')
   };
 }
 
-const request: NativeWindowMenuRequest = { menu: 'file', x: 8, y: 32, applicationEnabled: true };
+const request: NativeWindowMenuRequest = {
+  menu: 'application',
+  x: 8,
+  y: 32,
+  applicationEnabled: true,
+};
 
 test('Windows menu anchors follow page zoom and work independently of Service readiness', async () => {
   const f = fixture();

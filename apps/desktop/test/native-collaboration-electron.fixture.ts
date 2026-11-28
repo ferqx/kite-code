@@ -322,7 +322,7 @@ try {
     .getByText('等待你的批准', { exact: false })
     .first()
     .waitFor();
-  await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+  await page.getByRole('button', { name: '标签页', exact: true }).click();
   await page.getByRole('button', { name: '隐藏环境信息', exact: true }).click();
   await (await showApproval(oldA.id))
     .getByRole('button', { name: '更多批准方式', exact: true })
@@ -400,7 +400,7 @@ try {
     .getByRole('button', { name: '查看子 Agent 详情：CHILD_A', exact: true })
     .click();
   await page.locator('.session-tab-child').getByText('CHILD_A_DONE_1', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+  await page.getByRole('button', { name: '标签页', exact: true }).click();
   log('child_result_visible_before_parent_reply', {
     sourceId: firstResultId,
     childSessionId: a.childSessionId,
@@ -767,7 +767,7 @@ try {
     .getByText('CHILD_A_ACTIVE_DONE_1', { exact: true })
     .waitFor();
   await page.screenshot({ path: join(home, '03ca-active-result-detail.png') });
-  await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+  await page.getByRole('button', { name: '标签页', exact: true }).click();
   assert.equal(
     (await state()).selection!.runs.find((run) => run.id === activeRun.id)!.isActive,
     true,

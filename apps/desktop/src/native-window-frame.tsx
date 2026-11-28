@@ -1,11 +1,12 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { NAVIGATION_MIN_WIDTH } from '@kite-ai/ui/desktop';
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { NativeWindowMenuAction, NativeWindowMenuId } from './native-menu-bridge';
 
-const menus = [
-  { id: 'file', label: '文件', key: 'f' },
-  { id: 'edit', label: '编辑', key: 'e' },
-  { id: 'view', label: '视图', key: 'v' },
-  { id: 'help', label: '帮助', key: 'h' },
+const menuShortcuts = [
+  { id: 'file', key: 'f' },
+  { id: 'edit', key: 'e' },
+  { id: 'view', key: 'v' },
+  { id: 'help', key: 'h' },
 ] as const;
 
 export function NativeWindowFrame({
@@ -22,6 +23,7 @@ export function NativeWindowFrame({
   navigation?: {
     sidebarHost: (element: HTMLDivElement | null) => void;
     searchHost: (element: HTMLDivElement | null) => void;
+    sessionHeaderHost?: (element: HTMLDivElement | null) => void;
     back?: () => void;
     forward?: () => void;
   };
@@ -29,16 +31,72 @@ export function NativeWindowFrame({
   const windows = document.documentElement.dataset.platform === 'windows';
   const mac = document.documentElement.dataset.platform === 'macos';
   const bridge = window.kiteNative;
-  const [active, setActive] = useState<NativeWindowMenuId>();
-  const [focused, setFocused] = useState(0);
+  const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState('');
-  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+  const titlebar = useRef<HTMLDivElement>(null);
+  const windowContent = useRef<HTMLDivElement>(null);
+  const menuButton = useRef<HTMLButtonElement | null>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
   const actionHandler = useRef({ applicationEnabled, onAction });
   actionHandler.current = { applicationEnabled, onAction };
   const opening = useRef(false);
+  const menuClosedAt = useRef(-Infinity);
+  const dismissingClick = useRef(false);
   const available = !!bridge?.showWindowMenu;
   const watchWindowMenuAction = bridge?.watchWindowMenuAction;
+  const getPageZoomFactor = bridge?.getPageZoomFactor;
+
+  useLayoutEffect(() => {
+    const element = titlebar.current;
+    const frame = element?.parentElement;
+    const content = windowContent.current;
+    const header = element?.querySelector('.native-window-session');
+    if (!showHeader || !windows || !element || !frame || !content) return;
+    let panel: Element | null = null;
+    const update = () => {
+      const zoom = getPageZoomFactor?.() ?? 1;
+      frame.style.setProperty('--native-titlebar-page-zoom', `${zoom}`);
+      if (!header) return;
+      const currentPanel = content.querySelector('.client-content-frame');
+      if (currentPanel !== panel) {
+        if (panel) observer?.unobserve(panel);
+        if (currentPanel) observer?.observe(currentPanel);
+        panel = currentPanel;
+      }
+      const toolbarLeft = element.getBoundingClientRect().left;
+      const contentLeft = (panel?.getBoundingClientRect().left ?? toolbarLeft) - toolbarLeft;
+      const sidebar = content.querySelector('#navigation');
+      const navigation = sidebar?.getBoundingClientRect();
+      const right = navigation ? navigation.right - toolbarLeft : contentLeft;
+      // The body can collapse to zero while the titlebar keeps its default navigation space.
+      const dividerLeft = navigation
+        ? Math.max(right, navigation.left - toolbarLeft + NAVIGATION_MIN_WIDTH)
+        : right;
+      const dividerWidth = sidebar
+        ? Number.parseFloat(getComputedStyle(sidebar).getPropertyValue('--resize-handle-width')) ||
+          0
+        : 0;
+      const headerLeft = header.getBoundingClientRect().left - toolbarLeft;
+      const dividerOffset = (dividerLeft - headerLeft) * zoom;
+      const titleInset = Math.max(0, (dividerLeft + dividerWidth - headerLeft) * zoom + 16);
+      element.style.setProperty('--native-titlebar-border-left', `${contentLeft * zoom}px`);
+      element.style.setProperty('--native-titlebar-divider-offset', `${dividerOffset}px`);
+      element.style.setProperty(
+        '--native-titlebar-divider-width',
+        `${Math.max(0, dividerWidth * zoom)}px`,
+      );
+      element.style.setProperty('--native-titlebar-heading-inset', `${titleInset}px`);
+    };
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+    if (header) observer?.observe(header);
+    observer?.observe(content);
+    update();
+    window.addEventListener('resize', update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [getPageZoomFactor, showHeader, windows]);
 
   useEffect(() => {
     if (!windows) return;
@@ -48,17 +106,16 @@ export function NativeWindowFrame({
     });
   }, [watchWindowMenuAction, windows]);
 
-  async function openMenu(index: number) {
-    const button = buttons.current[index];
-    const definition = menus[index];
-    if (!button || !definition || !bridge?.showWindowMenu || opening.current) return;
-    const menu = definition.id;
+  async function openMenu(menu: NativeWindowMenuId = 'application') {
+    const button = menuButton.current;
+    if (!button || !bridge?.showWindowMenu || opening.current) return;
     const bounds = button.getBoundingClientRect();
     opening.current = true;
-    setActive(menu);
+    setExpanded(true);
     setError('');
     // Native edit roles must keep the original editor and selection as their target.
-    if (previousFocus.current?.isConnected) previousFocus.current.focus();
+    if (document.activeElement === button && previousFocus.current?.isConnected)
+      previousFocus.current.focus({ preventScroll: true });
     try {
       await bridge.showWindowMenu({
         menu,
@@ -66,29 +123,27 @@ export function NativeWindowFrame({
         y: Math.round(bounds.bottom),
         applicationEnabled: actionHandler.current.applicationEnabled,
       });
+      menuClosedAt.current = performance.now();
     } catch {
       setError('菜单打开失败，请重试。');
     } finally {
       opening.current = false;
-      setActive(undefined);
+      setExpanded(false);
     }
   }
 
   useEffect(() => {
     if (!showHeader || !windows || !available) return;
     const keydown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      const index = event.altKey
-        ? menus.findIndex((menu) => menu.key === event.key.toLowerCase())
-        : -1;
-      if (index < 0 && event.key !== 'F10') return;
+      if (event.isComposing || event.repeat || event.ctrlKey || event.metaKey || event.shiftKey)
+        return;
+      const shortcut = event.altKey
+        ? menuShortcuts.find(({ key }) => key === event.key.toLowerCase())
+        : undefined;
+      if (!shortcut && (event.altKey || event.key !== 'F10')) return;
       event.preventDefault();
-      const element = document.activeElement;
-      if (element instanceof HTMLElement && !buttons.current.includes(element as HTMLButtonElement))
-        previousFocus.current = element;
-      setFocused(index < 0 ? 0 : index);
-      if (index >= 0) void openMenu(index);
-      else buttons.current[0]?.focus();
+      if (shortcut) void openMenu(shortcut.id);
+      else menuButton.current?.focus({ preventScroll: true });
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
@@ -97,66 +152,52 @@ export function NativeWindowFrame({
   return (
     <div className="native-window-frame" data-window-navigation={navigation ? 'true' : undefined}>
       {showHeader ? (
-        <div className="native-window-titlebar">
+        <div className="native-window-titlebar" ref={titlebar}>
           {windows ? (
-            <div role="menubar" aria-label="应用菜单" className="native-window-menubar">
-              {menus.map((menu, index) => (
-                <button
-                  key={menu.id}
-                  ref={(element) => {
-                    buttons.current[index] = element;
-                  }}
-                  type="button"
-                  role="menuitem"
-                  aria-haspopup="menu"
-                  aria-expanded={active === menu.id}
-                  aria-keyshortcuts={`Alt+${menu.key.toUpperCase()}`}
-                  tabIndex={focused === index ? 0 : -1}
-                  disabled={!available}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    const element = document.activeElement;
-                    if (
-                      element instanceof HTMLElement &&
-                      !buttons.current.includes(element as HTMLButtonElement)
-                    )
-                      previousFocus.current = element;
-                  }}
-                  onFocus={(event) => {
-                    const element = event.relatedTarget;
-                    if (
-                      element instanceof HTMLElement &&
-                      !buttons.current.includes(element as HTMLButtonElement)
-                    )
-                      previousFocus.current = element;
-                    setFocused(index);
-                  }}
-                  onClick={() => void openMenu(index)}
-                  onKeyDown={(event) => {
-                    const direction =
-                      event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-                    if (direction || event.key === 'Home' || event.key === 'End') {
-                      event.preventDefault();
-                      const next =
-                        event.key === 'Home'
-                          ? 0
-                          : event.key === 'End'
-                            ? menus.length - 1
-                            : (index + direction + menus.length) % menus.length;
-                      buttons.current[next]?.focus();
-                    } else if (event.key === 'ArrowDown') {
-                      event.preventDefault();
-                      void openMenu(index);
-                    } else if (event.key === 'Escape') {
-                      event.preventDefault();
-                      previousFocus.current?.focus();
-                    }
-                  }}
-                >
-                  {menu.label}
-                </button>
-              ))}
-            </div>
+            <button
+              ref={menuButton}
+              type="button"
+              className="native-window-menu-button"
+              aria-label="应用菜单"
+              title={expanded ? undefined : '应用菜单'}
+              aria-haspopup="menu"
+              aria-expanded={expanded}
+              aria-keyshortcuts="F10"
+              disabled={!available}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                // Electron can dismiss the popup before forwarding that same press to the button.
+                dismissingClick.current =
+                  opening.current || performance.now() - menuClosedAt.current < 50;
+              }}
+              onFocus={(event) => {
+                previousFocus.current =
+                  event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null;
+              }}
+              onClick={(event) => {
+                if (event.detail === 0 || !dismissingClick.current) void openMenu();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  void openMenu();
+                } else if (event.key === 'Escape' && previousFocus.current?.isConnected) {
+                  event.preventDefault();
+                  previousFocus.current.focus({ preventScroll: true });
+                }
+              }}
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              >
+                <path d="M2 3.5h12M2 8h12M2 12.5h12" />
+              </svg>
+            </button>
           ) : null}
           {navigation && (
             <nav className="native-window-navigation" aria-label="页面导航">
@@ -197,9 +238,14 @@ export function NativeWindowFrame({
               {error}
             </span>
           )}
+          {windows && navigation?.sessionHeaderHost && (
+            <div className="kite-client native-window-session" ref={navigation.sessionHeaderHost} />
+          )}
         </div>
       ) : null}
-      <div className="native-window-content">{children}</div>
+      <div className="native-window-content" ref={windowContent}>
+        {children}
+      </div>
     </div>
   );
 }

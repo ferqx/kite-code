@@ -406,7 +406,7 @@ Native 原主题属于窗口 Host。preload 的固定主题端口只传暗／亮
 
 Native 原消息复制与标题栏缩放同属窗口 Host。preload 只提供固定文本复制／无参数缩放端口，Main 在宿主动作前核当前窗口、准确主 frame、renderer URL 和闭合 payload；复制保原 1 MiB UTF-8 上限，超限失败、不截断，缩放只按实际窗口状态切换。端口不取得 Store／Session／Service 或执行 authority，正文是否完整及当前可复制仍归原共享 UI／原 reader。失败不重发业务或丢弃草稿；实现与分层验证归[Native owner](../../apps/desktop/README.md#原消息复制与标题栏缩放)。
 
-Windows 顶栏菜单同属窗口 Host。有限 IPC 只接受四个菜单枚举、窗口内整数位置与页面可操作标记，Main 在原准确窗口／主 frame／renderer URL 校验后按真实缩放打开原生下拉；该标记不授予业务权限。文件项及三个固定快捷键只返回既有页面动作，renderer 复核当前启动、mutation 与退出状态后调用原 controller。编辑与窗口角色不打开 Service caller；隐藏和退出继续沿原生命周期，设置、目录选择及登记仍由原业务端口授权。当前实现与 Windows 有限窗口验证归[Native owner](../../apps/desktop/README.md#windows-顶栏菜单)，Core、公开 API 与私有格式保持。
+Windows 顶栏菜单同属窗口 Host。有限 IPC 只接受应用菜单和四个分类枚举、窗口内整数位置与页面可操作标记，Main 在原准确窗口／主 frame／renderer URL 校验后按真实缩放打开原生下拉；该标记不授予业务权限。文件项及三个固定快捷键只返回既有页面动作，renderer 复核当前启动、mutation 与退出状态后调用原 controller。编辑与窗口角色不打开 Service caller；隐藏和退出继续沿原生命周期，设置、目录选择及登记仍由原业务端口授权。当前实现与 Windows 有限窗口验证归[Native owner](../../apps/desktop/README.md#windows-顶栏菜单)，Core、公开 API 与私有格式保持。
 
 Native 明确退出的活动检查只读完整公共目录与 View；两秒超时仅撤销本次 GET，不能把未回答当无活动，也不撤销其他观察。普通窗口隐藏／激活不停止 Service。活动或未知时最多一次确认，空闲直接关闭界面；确认后 Main 在任何清理 await 前销毁原窗口，macOS 同时隐藏应用与 Dock，禁止激活或迟到启动重新展示。最后窗口关闭不提前结束原 Main；启动、在途重载与资源仍由原 owner 在后台收束，没有默认二十秒强杀。清理完成才退出0，清理失败沿准确 child 句柄处理并退出1，不追加提示。紧急退出不发现其他 PID，不给卸载或普通读取强杀资格。配对 launcher close 与实际退出状态分别核实，非零退出仍为失败；窗口消失不证明清理和取消成功，未知执行保持原事实，正常清理顺序和双层制品使用权不放宽；实现与有限故障／实际窗口范围见[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)。
 

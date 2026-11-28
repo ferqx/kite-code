@@ -382,7 +382,13 @@ test('tabs replace the direct file changes action; only the visible selected too
     false,
   );
   expect(mounted).toBe(0);
+  const toggle = document.querySelector<HTMLButtonElement>('button[aria-label="标签页"]')!;
+  const closedIcon = toggle.querySelector('svg')!.innerHTML;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
   await click('标签页');
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(toggle.querySelector('svg')!.innerHTML).not.toBe(closedIcon);
+  expect(document.querySelector('#session-tabs .right-sidebar-close')).toBeNull();
   expect(document.querySelector('#session-tabs')!.hasAttribute('hidden')).toBe(false);
   expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
   const customBrowser = document.querySelector('[data-browser-id]')!;
@@ -403,7 +409,10 @@ test('tabs replace the direct file changes action; only the visible selected too
   await changes();
   expect(document.querySelectorAll('[role="tab"]')).toHaveLength(3);
   expect(mounted - closed).toBe(1);
-  await click('收起标签栏');
+  await click('标签页');
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(toggle.querySelector('svg')!.innerHTML).toBe(closedIcon);
+  expect(document.activeElement).toBe(toggle);
   const shell = document.querySelector<HTMLElement>('#session-tabs')!;
   expect(shell.hidden).toBe(true);
   expect(shell.classList.contains('right-sidebar')).toBe(false);
@@ -645,7 +654,7 @@ test('child requests reuse exact carrier tabs and only the visible selected chil
   expect(childChanges.at(-1)).toBeUndefined();
   await render();
   expect(childMounted - childClosed).toBe(1);
-  await click('收起标签栏');
+  await click('标签页');
   expect(childMounted - childClosed).toBe(0);
   await click('标签页');
   expect(childMounted - childClosed).toBe(1);
@@ -728,7 +737,7 @@ test('managed browser is one retained tab in the existing strip; switching and c
   expect(workspaceUnmounts).toBe(0);
   await selectTab('Agent 浏览器');
   expect(frame.getAttribute('data-workspace-visible')).toBe('true');
-  await click('收起标签栏');
+  await click('标签页');
   expect(frame.getAttribute('data-workspace-visible')).toBe('false');
   await render('a', false, false, undefined, { ...request, requestId: 2 });
   expect(document.querySelector('[data-workspace-visible]')).toBe(frame);

@@ -18,10 +18,19 @@ public static class KiteNativeUIA {
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+ [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  [StructLayout(LayoutKind.Sequential)] public struct KEY { public ushort vk, scan; public uint flags, time; public UIntPtr extra; }
  [StructLayout(LayoutKind.Explicit)] public struct UNION { [FieldOffset(0)] public KEY key; [FieldOffset(0)] public long mouse0; [FieldOffset(8)] public long mouse1; [FieldOffset(16)] public long mouse2; [FieldOffset(24)] public long mouse3; }
  [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public UNION data; }
  [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+ public static void OpenApplicationMenu() {
+  var keys = new INPUT[4];
+  keys[0].type=1; keys[0].data.key.vk=0x79; // F10 focuses the application menu button.
+  keys[1]=keys[0]; keys[1].data.key.flags=2;
+  keys[2].type=1; keys[2].data.key.vk=0x28; keys[2].data.key.flags=1; // ArrowDown opens it.
+  keys[3]=keys[2]; keys[3].data.key.flags=3;
+  if(SendInput(4,keys,Marshal.SizeOf(typeof(INPUT)))!=4) throw new Exception("uia_send_input_failed");
+ }
  public static void UnicodeText(string text) {
   foreach(char c in text) {
    var a = new INPUT[2]; a[0].type=1; a[0].data.key.scan=c; a[0].data.key.flags=4;
@@ -76,10 +85,6 @@ function Find-Named($root,$r) {
    if ($e.Current.ControlType -ne [System.Windows.Automation.ControlType]::Edit -or -not $e.Current.IsKeyboardFocusable) { continue }
    $eligible=$e.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)
    if (-not $eligible) { $pattern=$null; $eligible=$e.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$pattern) }
-  } elseif ($r.action -eq 'fileMenu') {
-   if ($e.Current.ControlType -ne [System.Windows.Automation.ControlType]::MenuItem) { continue }
-   $eligible=$e.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$pattern)
-   if (-not $eligible) { $pattern=$null; $eligible=$e.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern) }
   }
   if ($eligible) { $found+=,$e }
  }
@@ -91,6 +96,29 @@ function Invoke-Element($e) {
  $pattern=$null
  if (-not $e.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) { Fail 'uia_invoke_pattern_missing' }
  $pattern.Invoke()
+}
+function Find-NativeMenuItem($h, $r, $actionClock, [string]$name, [bool]$canExpand) {
+ # Popups can be desktop children. Find them again at each level in the retained Main.
+ do {
+  Verify-Original $h $r
+  $menus=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,[int]$r.pid))
+  $choices=@(); foreach($menu in $menus) {
+   $items=$menu.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem))
+   foreach($item in $items) {
+    if ($item.Current.Name -notmatch $name -or -not $item.Current.IsEnabled -or $item.Current.IsOffscreen) { continue }
+    $pattern=$null
+    $expandable=$canExpand -and $item.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$pattern)
+    if (-not $expandable -and -not $item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) { continue }
+    $duplicate=$false
+    foreach($choice in $choices) { if ([System.Windows.Automation.Automation]::Compare($choice,$item)) { $duplicate=$true; break } }
+    if (-not $duplicate) { $choices+=,$item }
+   }
+  }
+  if ($choices.Count -gt 1) { Fail 'uia_quit_menu_not_unique' }
+  if ($choices.Count -eq 1) { return $choices[0] }
+  Start-Sleep -Milliseconds 10
+ } while ($actionClock.ElapsedMilliseconds -lt $r.budgetMs)
+ Fail 'uia_quit_menu_not_unique'
 }
 [Console]::WriteLine('{"ready":true}')
 while ($null -ne ($line=[Console]::ReadLine())) {
@@ -156,31 +184,16 @@ while ($null -ne ($line=[Console]::ReadLine())) {
     $result=@{elements=@();observation=@{code='uia_snapshot_changed';type=$cause.GetType().FullName;hresult=$cause.HResult}}
    }
   } elseif ($r.action -eq 'quit') {
-   $file=Find-Named $root @{name='^(File|文件)(\(&F\))?$';match='regex';action='fileMenu'}
+   if ([KiteNativeUIA]::GetForegroundWindow() -ne $window -and -not [KiteNativeUIA]::SetForegroundWindow($window)) { Fail 'uia_foreground_failed' }
+   Verify-Original $h $r
+   if ([KiteNativeUIA]::GetForegroundWindow() -ne $window) { Fail 'uia_focus_changed' }
+   [KiteNativeUIA]::OpenApplicationMenu()
+   $file=Find-NativeMenuItem $h $r $actionClock '^(File|文件)(\(&F\))?$' $true
    Verify-Original $h $r
    $expand=$null
    if ($file.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$expand)) { $expand.Expand() } else { Invoke-Element $file }
-   # The native menu popup may be a desktop child; only accept items whose kernel HWND belongs to this original Main.
-   do {
-   Verify-Original $h $r
-   $menus=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,[int]$r.pid))
-   $choices=@(); foreach($menu in $menus) {
-    $items=$menu.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem))
-    foreach($item in $items) {
-     if ($item.Current.Name -notmatch '^(Quit|Exit|退出)(\([&A-Z]\))?(\s+.*)?$' -or -not $item.Current.IsEnabled -or $item.Current.IsOffscreen) { continue }
-     $invoke=$null
-     if (-not $item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$invoke)) { continue }
-     $duplicate=$false
-     foreach($choice in $choices) { if ([System.Windows.Automation.Automation]::Compare($choice,$item)) { $duplicate=$true; break } }
-     if (-not $duplicate) { $choices+=,$item }
-    }
-   }
-   if ($choices.Count -gt 1) { Fail 'uia_quit_menu_not_unique' }
-   if ($choices.Count -eq 1) { break }
-   Start-Sleep -Milliseconds 10
-   } while ($actionClock.ElapsedMilliseconds -lt $r.budgetMs)
-   if ($choices.Count -ne 1) { Fail 'uia_quit_menu_not_unique' }
-   Verify-Original $h $r; Invoke-Element $choices[0]; $result=@{quitRequested=$true}
+   $quit=Find-NativeMenuItem $h $r $actionClock '^(Quit|Exit|退出)(\([&A-Z]\))?(\s+.*)?$' $false
+   Verify-Original $h $r; Invoke-Element $quit; $result=@{quitRequested=$true}
   } else {
    $e=Find-Named $root $r; Verify-Original $h $r
    if ($r.action -eq 'clickByName') { $before=Describe $e; Invoke-Element $e; $result=@{invoked=$before} }

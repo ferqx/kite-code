@@ -74,12 +74,14 @@ test('actual Native page retains window actions and connects Windows menus to th
     content: '原草稿\n雪🙂',
   };
   let menuAction: ((action: NativeWindowMenuAction) => void) | undefined;
+  let pendingMenu: Promise<void> | undefined;
   const menuRequests: NativeWindowMenuRequest[] = [];
   const bridge: NativeBridge & NativeWindowBridge & NativeWindowMenuBridge = {
     confirmFullPermission: async () => false,
     cancelFullPermissionConfirmation() {},
     showWindowMenu: async (request) => {
       menuRequests.push(request);
+      await pendingMenu;
     },
     watchWindowMenuAction: (listener) => {
       menuAction = listener;
@@ -149,6 +151,13 @@ test('actual Native page retains window actions and connects Windows menus to th
       sidebar = host.querySelector('.sidebar-header')!,
       draft = host.querySelector<HTMLElement>('[role="textbox"][aria-label="新对话草稿"]')!;
     expect(header).not.toBeNull();
+    expect(header.parentElement?.closest('.native-window-titlebar')).not.toBeNull();
+    expect(host.querySelector('.client-main-panel .session-header')).toBeNull();
+    expect(
+      host
+        .querySelector<HTMLDivElement>('.client-main-panel')
+        ?.style.getPropertyValue('--session-header-height'),
+    ).toBe('0px');
     expect(sidebar).not.toBeNull();
     expect(dom.window.document.querySelector('.native-toast')).toBeNull();
     expect(promptValue(draft)).toBe('原草稿\n雪🙂');
@@ -190,12 +199,58 @@ test('actual Native page retains window actions and connects Windows menus to th
         ),
       ),
     ).toBe(true);
-    const menus = Array.from(
-      host.querySelectorAll<HTMLButtonElement>('[role="menubar"] [role="menuitem"]'),
+    const menuButtons = host.querySelectorAll<HTMLButtonElement>(
+      '.native-window-titlebar button[aria-haspopup="menu"]',
     );
-    expect(menus.map((menu) => menu.textContent)).toEqual(['文件', '编辑', '视图', '帮助']);
-    await act(async () => menus[1]!.click());
-    expect(menuRequests).toEqual([{ menu: 'edit', x: 0, y: 0, applicationEnabled: true }]);
+    expect(menuButtons).toHaveLength(1);
+    const menuButton = menuButtons[0]!;
+    expect(menuButton.getAttribute('aria-label')).toBe('应用菜单');
+    expect(menuButton.getAttribute('aria-expanded')).toBe('false');
+    let rejectMenu!: (reason: Error) => void;
+    pendingMenu = new Promise<void>((_resolve, reject) => {
+      rejectMenu = reject;
+    });
+    await act(async () => {
+      draft.focus();
+      dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'F10' }));
+    });
+    expect(dom.window.document.activeElement).toBe(menuButton);
+    expect(menuRequests).toEqual([]);
+    await act(async () => {
+      menuButton.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      );
+      menuButton.click();
+    });
+    const rootMenu: NativeWindowMenuRequest = {
+      menu: 'application',
+      x: 0,
+      y: 0,
+      applicationEnabled: true,
+    };
+    expect(menuRequests).toEqual([rootMenu]);
+    expect(menuButton.getAttribute('aria-expanded')).toBe('true');
+    expect(menuButton.hasAttribute('title')).toBe(false);
+    expect(dom.window.document.activeElement).toBe(draft);
+    await act(async () => rejectMenu(Error('native_window_menu_failed')));
+    pendingMenu = undefined;
+    expect(menuButton.getAttribute('aria-expanded')).toBe('false');
+    expect(menuButton.title).toBe('应用菜单');
+    expect(host.querySelector('.native-window-menu-error')?.textContent).toBe(
+      '菜单打开失败，请重试。',
+    );
+    await act(async () => menuButton.click());
+    expect(menuRequests).toEqual([rootMenu, rootMenu]);
+    expect(menuButton.getAttribute('aria-expanded')).toBe('false');
+    expect(host.querySelector('.native-window-menu-error')).toBeNull();
+    for (const key of ['f', 'e', 'v', 'h']) {
+      await act(async () => {
+        dom.window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, altKey: true }));
+      });
+    }
+    expect(menuRequests.slice(2)).toEqual(
+      (['file', 'edit', 'view', 'help'] as const).map((menu) => ({ ...rootMenu, menu })),
+    );
     expect(calls.length).toBe(before);
     const editedDraft = '已编辑草稿\n雪🙂';
     await act(async () => {

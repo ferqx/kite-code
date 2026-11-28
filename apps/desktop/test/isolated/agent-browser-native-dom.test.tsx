@@ -290,7 +290,9 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
     await until(() => !!button('浏览器控制'));
     await openControlMenu();
     await flush(() => resolveMenu(null));
-    await flush(() => host.querySelector<HTMLButtonElement>('[aria-label="收起标签栏"]')!.click());
+    await flush(() =>
+      host.querySelector<HTMLButtonElement>('button[aria-label="标签页"]')!.click(),
+    );
     await until(() => host.querySelector('#session-tabs')?.getAttribute('aria-hidden') === 'true');
     await flush(() => control.publish(), 380);
     expect(host.querySelector('#session-tabs')?.getAttribute('aria-hidden')).toBe('true');

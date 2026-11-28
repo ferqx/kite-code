@@ -1,6 +1,7 @@
 import type {
   NativeBridge,
   NativeDirectory,
+  NativeDraft,
   NativeEvent,
   NativeReasoningEffort,
   NativeRequest,
@@ -64,6 +65,7 @@ export function sessionSwitchBridge(
   let sessionObservation = { id: 0, sessionId: '' };
   let unknownSessionMutation = false;
   const sessionSubmissions: NativeSessionSubmission[] = [];
+  const savedDrafts = new Map<string, NativeDraft>();
   const send = () => {
     for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
   };
@@ -326,7 +328,7 @@ export function sessionSwitchBridge(
           return state();
         }
         case 'draft.read': {
-          const draft = {
+          const draft = savedDrafts.get(request.sessionId) ?? {
             id: selected,
             storeId: 'store',
             workspaceId: options.worktreeNavigation && selected === 'b' ? 'worktree' : 'w',
@@ -335,6 +337,24 @@ export function sessionSwitchBridge(
             content: options.drafts?.[selected] ?? `Draft ${selected.toUpperCase()}`,
           };
           return options.holdDraft ? wait('draft', () => draft) : draft;
+        }
+        case 'draft.write': {
+          if (!options.manageSessions) return null;
+          const prior = savedDrafts.get(request.sessionId);
+          if (request.revision !== (prior?.revision ?? 1)) throw Error('draft_revision_conflict');
+          const draft: NativeDraft = {
+            id: request.sessionId,
+            storeId: 'store',
+            workspaceId: request.workspaceId ?? 'w',
+            rootSessionId: request.sessionId,
+            revision: request.revision + 1,
+            content: request.content,
+            browserAnnotations: request.browserAnnotations,
+            annotationImageOffset: request.annotationImageOffset,
+            outputFiles: request.outputFiles,
+          };
+          savedDrafts.set(request.sessionId, draft);
+          return draft;
         }
         case 'messages': {
           if (withdrawn) throw Error('native_view_unavailable');

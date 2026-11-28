@@ -114,7 +114,7 @@ export function registerNativeWindowMenuIpc(options: {
           !Object.keys(input).every((key) =>
             ['menu', 'x', 'y', 'applicationEnabled'].includes(key),
           ) ||
-          !['file', 'edit', 'view', 'help'].includes(input.menu as string) ||
+          !['application', 'file', 'edit', 'view', 'help'].includes(input.menu as string) ||
           typeof input.applicationEnabled !== 'boolean' ||
           !Number.isSafeInteger(input.x) ||
           !Number.isSafeInteger(input.y)
