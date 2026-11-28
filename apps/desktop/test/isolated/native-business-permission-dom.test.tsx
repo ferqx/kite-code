@@ -167,7 +167,18 @@ test('plan review hides permissions while ordinary questions retain their scoped
         mutations.push({ mode: input.mode, observationId: input.observationId });
         mode = input.mode;
         revision++;
-        return null;
+        return {
+          commandId: `mode-${revision}`,
+          kind: 'permission.mode',
+          state: 'applied',
+          receipt: {
+            status: 'applied',
+            mode,
+            revision: String(revision),
+            makeDefault: input.makeDefault,
+            defaultRevision: '0',
+          },
+        };
       }
       if (input.method === 'interaction.answer') {
         answers++;

@@ -54,7 +54,9 @@ export const control = sessionSwitchBridge({
   protocol: 'chat-completions',
   modelNames: { b: 'Model B Extended Reasoning Route' },
   replyParagraphs:
-    pageNavigation || new URL(location.href).searchParams.has('long')
+    pageNavigation ||
+    new URL(location.href).searchParams.has('long') ||
+    new URL(location.href).searchParams.has('long-history')
       ? 40
       : new URL(location.href).searchParams.has('model-navigation')
         ? 20

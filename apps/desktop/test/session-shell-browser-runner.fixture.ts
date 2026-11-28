@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import type { NativeState } from '../src/native-bridge';
 import type {} from './session-shell-browser.fixture';
 import {
   verifyColdSessionToolbarWidth,
@@ -124,6 +125,28 @@ declare global {
   interface Window {
     captureShell: () => Snapshot;
     resetShellIdentity: () => void;
+    permissionSwitch: {
+      release(success: boolean): void;
+      readback(): void;
+      confirm(accepted: boolean): void;
+      awaitingConfirmation(): boolean;
+      sample(): {
+        label: string | null;
+        busy: boolean;
+        locked: boolean;
+        attempts: number;
+        same: boolean;
+        opacity: string;
+        color: string;
+        visible: string;
+        disabled: boolean;
+        value: string;
+        scroll: number;
+        messages: number;
+        draftWarning: boolean;
+        buttonOpacities: string[];
+      };
+    };
   }
 }
 const report = { browser: browser.version(), cases: [] as unknown[] };
@@ -200,7 +223,9 @@ try {
         });
         const errors: string[] = [];
         page.on('pageerror', (error) => errors.push(error.message));
-        await page.goto(`${server.url.toString()}?metrics=${width === 500 ? 'cache' : 'both'}`);
+        await page.goto(
+          `${server.url.toString()}?long-history&manage-sessions&metrics=${width === 500 ? 'cache' : 'both'}`,
+        );
         const permission = page.locator('[data-permission-trigger]');
         await page.waitForFunction(
           () =>
@@ -320,80 +345,239 @@ try {
         }
         const editor = page.locator('.prompt-editor');
         await editor.fill('权限切换草稿 雪🙂');
+        await page.locator('.conversation-viewport').evaluate(async (viewport) => {
+          viewport.scrollTop = Math.floor((viewport.scrollHeight - viewport.clientHeight) / 2);
+          await new Promise(requestAnimationFrame);
+        });
         const beforePermission = await editor.evaluate((node) => {
           const style = getComputedStyle(node);
           const original = node;
-          const request = window.sessionShellFixture.bridge.request;
-          let release!: () => void;
-          const held = new Promise<void>((resolve) => {
-            release = resolve;
+          const viewport = document.querySelector('.conversation-viewport')!;
+          const fixture = window.sessionShellFixture;
+          const request = fixture.bridge.request;
+          let release!: (success: boolean) => void;
+          let confirm: ((accepted: boolean) => void) | undefined;
+          let projectedMode: 'auto' | 'accept_edits' | 'full' = 'auto';
+          let projectedRevision = 0;
+          let observation: number | undefined;
+          let attempts = 0;
+          let submission: NativeState['permissionSubmissions'][number] | undefined;
+          Object.assign(fixture.bridge, {
+            confirmFullPermission: () =>
+              new Promise<boolean>((resolve) => {
+                confirm = resolve;
+              }),
+            cancelFullPermissionConfirmation: () => confirm?.(false),
           });
-          window.sessionShellFixture.bridge.request = async (input) => {
-            if (input.method === 'permission.mode') await held;
-            return request(input);
+          fixture.bridge.request = async (input) => {
+            if (input.method === 'permission.mode') {
+              observation = input.observationId;
+              const commandId = `mode-${++attempts}`;
+              const original = {
+                kind: 'permission.mode' as const,
+                sessionId: 'a',
+                rootSessionId: 'a',
+                workspaceId: 'w',
+                observationId: observation,
+                intent: {
+                  expectedStoreId: 'store',
+                  commandId,
+                  mode: input.mode,
+                  makeDefault: false,
+                  ifRevision: String(projectedRevision),
+                  ifDefaultRevision: '1',
+                },
+              };
+              submission = { ...original, phase: 'submitting' };
+              const result = new Promise<boolean>((resolve) => {
+                release = resolve;
+              });
+              fixture.refresh(false);
+              if (!(await result)) {
+                submission = { ...original, phase: 'failed', error: 'host_control_conflict' };
+                fixture.refresh(false);
+                throw Error('host_control_conflict');
+              }
+              const receipt = {
+                commandId,
+                kind: 'permission.mode',
+                state: 'applied',
+                receipt: {
+                  status: 'applied',
+                  mode: input.mode,
+                  makeDefault: false,
+                  revision: String(projectedRevision + 1),
+                  defaultRevision: '1',
+                },
+              } as const;
+              submission = { ...original, phase: 'applied', receipt };
+              fixture.refresh(false);
+              return receipt;
+            }
+            const result = await request(input);
+            if (
+              input.method === 'state' &&
+              result &&
+              'generation' in result &&
+              result.selection?.session.id === 'a' &&
+              result.selection.permissions
+            ) {
+              const facts = result.selection.permissions;
+              return {
+                ...result,
+                permissionSubmissions: submission ? [submission] : [],
+                selection: {
+                  ...result.selection,
+                  permissions: {
+                    ...facts,
+                    observationId: observation ?? facts.observationId,
+                    mode: {
+                      ...facts.mode,
+                      mode: projectedMode,
+                      revision: String(projectedRevision),
+                    },
+                  },
+                },
+              };
+            }
+            return result;
           };
-          Object.assign(window, {
-            releasePermission: release,
-            samplePermissionEditor: () => {
+          window.permissionSwitch = {
+            release: (success) => release(success),
+            readback: () => {
+              if (
+                submission?.receipt?.kind === 'permission.mode' &&
+                submission.receipt.state === 'applied'
+              ) {
+                projectedMode = submission.receipt.receipt.mode;
+                projectedRevision = Number(submission.receipt.receipt.revision);
+              }
+              observation = observation! + 1;
+              fixture.refresh(false);
+            },
+            awaitingConfirmation: () => !!confirm,
+            confirm: (accepted) => {
+              const complete = confirm;
+              confirm = undefined;
+              complete?.(accepted);
+            },
+            sample: () => {
               const current = document.querySelector<HTMLTextAreaElement>('.prompt-editor')!;
+              const button = document.querySelector<HTMLButtonElement>(
+                '[data-permission-trigger]',
+              )!;
               const style = getComputedStyle(current);
               return {
-                same: current === original,
+                label: button.textContent,
+                busy: button.getAttribute('aria-busy') === 'true',
+                locked: button.disabled,
+                attempts,
+                same:
+                  current === original &&
+                  viewport === document.querySelector('.conversation-viewport'),
                 opacity: style.opacity,
                 color: style.color,
                 visible: style.visibility,
                 disabled: current.disabled,
                 value: current.value,
+                scroll: viewport.scrollTop,
+                messages: viewport.querySelectorAll('[data-message-id]').length,
+                draftWarning: [...document.querySelectorAll('[role="status"]')].some((notice) =>
+                  notice.textContent?.includes('草稿尚未确认'),
+                ),
                 buttonOpacities: [...document.querySelectorAll('.composer button')].map(
                   (button) => getComputedStyle(button).opacity,
                 ),
               };
             },
-          });
-          return { opacity: style.opacity, color: style.color };
+          };
+          return {
+            opacity: style.opacity,
+            color: style.color,
+            scroll: viewport.scrollTop,
+            messages: viewport.querySelectorAll('[data-message-id]').length,
+          };
         });
+        assert(beforePermission.scroll > 0);
+        const permissionFrames: ReturnType<Window['permissionSwitch']['sample']>[] = [];
+        async function checkPermission(
+          label: string,
+          busy: boolean,
+          locked: boolean,
+          disabled: boolean,
+          attempts: number,
+        ) {
+          const expected = { label, busy, locked, disabled, attempts };
+          await page.waitForFunction((expected) => {
+            const frame = window.permissionSwitch.sample();
+            return (
+              frame.label === expected.label &&
+              frame.busy === expected.busy &&
+              frame.locked === expected.locked &&
+              frame.disabled === expected.disabled
+            );
+          }, expected);
+          const frames = await page.evaluate(async () => {
+            const samples = [];
+            for (let index = 0; index < 18; index++) {
+              await new Promise(requestAnimationFrame);
+              samples.push(window.permissionSwitch.sample());
+            }
+            return samples;
+          });
+          for (const { buttonOpacities, ...frame } of frames) {
+            assert(buttonOpacities.length > 0);
+            assert(buttonOpacities.every((opacity) => opacity === '1'));
+            assert.deepEqual(frame, {
+              ...expected,
+              ...beforePermission,
+              same: true,
+              visible: 'visible',
+              value: '权限切换草稿 雪🙂',
+              draftWarning: false,
+            });
+          }
+          permissionFrames.push(...frames);
+        }
         await permission.click();
         await page.getByRole('menuitemradio', { name: /工作区内修改/ }).click();
-        await page.waitForFunction(
-          () => document.querySelector<HTMLTextAreaElement>('.prompt-editor')?.disabled,
-        );
-        const permissionFrames = await page.evaluate(async () => {
-          const scope = window as typeof window & {
-            samplePermissionEditor(): { buttonOpacities: string[] };
-          };
-          const frames = [];
-          for (let index = 0; index < 18; index++) {
-            await new Promise(requestAnimationFrame);
-            frames.push(scope.samplePermissionEditor());
-          }
-          return frames;
-        });
-        for (const frame of permissionFrames) {
-          const { buttonOpacities, ...editorFrame } = frame;
-          assert(buttonOpacities.length > 0);
-          assert(buttonOpacities.every((opacity) => opacity === '1'));
-          assert.deepEqual(editorFrame, {
-            same: true,
-            ...beforePermission,
-            visible: 'visible',
-            disabled: true,
-            value: '权限切换草稿 雪🙂',
-          });
-        }
+        await checkPermission('工作区内修改', true, true, true, 1);
         await page.screenshot({
           path: path.join(artifact, `${theme}-${width}-permission-pending.png`),
         });
-        await page.evaluate(() =>
-          (window as typeof window & { releasePermission(): void }).releasePermission(),
-        );
-        await page.waitForFunction(
-          () => !document.querySelector<HTMLTextAreaElement>('.prompt-editor')?.disabled,
-        );
-        assert.equal(await editor.inputValue(), '权限切换草稿 雪🙂');
-        assert.equal(
-          await editor.evaluate((node) => getComputedStyle(node).opacity),
-          beforePermission.opacity,
-        );
+        await page.evaluate(() => window.permissionSwitch.release(true));
+        await checkPermission('工作区内修改', true, true, false, 1);
+        const hit = (await permission.boundingBox())!;
+        await page.mouse.click(hit.x + hit.width / 2, hit.y + hit.height / 2);
+        assert.equal(await page.getByRole('menu').count(), 0);
+        await page.evaluate(() => window.permissionSwitch.readback());
+        await checkPermission('工作区内修改', false, false, false, 1);
+
+        await permission.click();
+        await page.getByRole('menuitemradio', { name: /完全访问/ }).click();
+        await page.waitForFunction(() => window.permissionSwitch.awaitingConfirmation());
+        await checkPermission('工作区内修改', true, true, false, 1);
+        await page.evaluate(() => window.permissionSwitch.confirm(false));
+        await checkPermission('工作区内修改', false, false, false, 1);
+
+        await permission.click();
+        await page.getByRole('menuitemradio', { name: /完全访问/ }).click();
+        await page.waitForFunction(() => window.permissionSwitch.awaitingConfirmation());
+        await page.evaluate(() => window.permissionSwitch.confirm(true));
+        await checkPermission('完全访问', true, true, true, 2);
+        await page.evaluate(() => window.permissionSwitch.release(false));
+        await checkPermission('工作区内修改', true, true, false, 2);
+        await page
+          .getByText('权限已在其他位置更新，请按最新模式重新选择。', { exact: true })
+          .waitFor();
+        await page.screenshot({
+          path: path.join(artifact, `${theme}-${width}-permission-failed.png`),
+        });
+        await page.evaluate(() => window.permissionSwitch.readback());
+        await checkPermission('工作区内修改', false, false, false, 2);
+        await permission.click();
+        await page.getByRole('menuitemradio', { name: /工作区内修改/ }).click();
+        await checkPermission('工作区内修改', false, false, false, 2);
         await editor.fill('');
         await page.locator('.composer-context-usage').hover();
         await page.getByRole('tooltip').waitFor();

@@ -316,7 +316,19 @@ export class NativeCaller {
         this.changed();
       },
       onExecutionObservation: (view) => this.observeExecution(view),
-      onPermissionSubmission: () => this.changed(),
+      onPermissionSubmission: (submission) => {
+        // A failed write can consume the observation without emitting a Store
+        // change. Renew it so the user can make a fresh choice.
+        if (
+          submission.kind === 'permission.mode' &&
+          submission.phase === 'failed' &&
+          submission.sessionId === this.selected &&
+          submission.observationId === this.controller.snapshot?.permissions?.observationId &&
+          this.observer
+        )
+          this.scheduleSelectionRefresh(this.observer.signal);
+        this.changed();
+      },
       onInteractionSubmission: () => this.changed(),
       interactionAnswerJournal: {
         prepare: (submission, view) => this.requireAnswers().prepare(submission, view),

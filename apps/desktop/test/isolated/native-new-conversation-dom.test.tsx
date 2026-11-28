@@ -147,6 +147,7 @@ function fixture(
     ['a', initialMode],
     ['b', 'auto'],
   ]);
+  const modeRevisions = new Map<string, number>();
   const registeredWorkspaces = [
     { id: 'w', name: 'Workspace', rootUri: 'file:///workspace' },
     { id: 'empty', name: 'Ordinary directory', rootUri: 'file:///ordinary' },
@@ -218,7 +219,7 @@ function fixture(
                     sessionId: selected,
                     scopeSessionId: selected,
                     mode: modes.get(selected) ?? 'auto',
-                    revision: '0',
+                    revision: String(modeRevisions.get(selected) ?? 0),
                     defaultMode: 'auto' as const,
                     defaultRevision: '0',
                   },
@@ -373,6 +374,8 @@ function fixture(
         expect(input.observationId).toBe(selected === 'a' ? 1 : 2);
         expect(input.makeDefault).toBe(false);
         modes.set(selected, input.mode as 'accept_edits' | 'auto' | 'full');
+        const revision = (modeRevisions.get(selected) ?? 0) + 1;
+        modeRevisions.set(selected, revision);
         return {
           commandId: `mode-${calls.length}`,
           kind: 'permission.mode',
@@ -381,7 +384,7 @@ function fixture(
             status: 'applied',
             mode: input.mode,
             makeDefault: false,
-            revision: '1',
+            revision: String(revision),
             defaultRevision: '0',
           },
         };
@@ -3661,6 +3664,9 @@ test('a held permission change preserves the send icon while genuine input submi
       f.host.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[1]!.click(),
     );
     expect(f.calls.filter((call) => call.method === 'permission.mode')).toHaveLength(1);
+    const heldPermission = f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!;
+    expect(heldPermission.getAttribute('aria-label')).toBe('Permission: Auto, changing');
+    expect(heldPermission.disabled).toBe(true);
     expect(send.disabled).toBe(true);
     expect(send.getAttribute('aria-busy')).toBeNull();
     expect(icon()).toEqual(initialIcon);
@@ -3679,6 +3685,8 @@ test('a held permission change preserves the send icon while genuine input submi
     expect(f.input('当前会话私有草稿')).toBe(input);
     expect(promptValue(input)).toBe('stable send icon 雪🙂');
     await act(async () => releasePermission());
+    expect(heldPermission.getAttribute('aria-label')).toBe('Permission: Auto');
+    expect(heldPermission.disabled).toBe(false);
     expect(send.disabled).toBe(false);
     expect(icon()).toEqual(initialIcon);
     expect(edit.disabled).toBe(false);

@@ -320,7 +320,11 @@ test('main makes failed permission reads unavailable before any new write; re-re
     await caller.close();
   }
 });
-test('main duplicate permission saves share one original request; unknown intent lookup remains on A after switching B', async () => {
+test.each([
+  'network_outcome_unknown',
+  'mutation_outcome_unknown',
+  'mutation_incomplete',
+])('main queries the original permission intent after switching sessions (%s)', async (unknownCode) => {
   const source = port();
   let release!: () => void, entered!: () => void;
   const gate = new Promise<void>((r) => {
@@ -340,7 +344,7 @@ test('main duplicate permission saves share one original request; unknown intent
       session = id;
       entered();
       await gate;
-      throw new ClientError('network_outcome_unknown');
+      throw new ClientError(unknownCode);
     },
     async getPermissionMutation(id: string, options: { storeId: string }) {
       lookup = id;
@@ -386,8 +390,8 @@ test('main duplicate permission saves share one original request; unknown intent
     expect(writes).toBe(1);
     await caller.invoke({ method: 'select', generation, sessionId: 'b' });
     release();
-    expect(await first).toBe('network_outcome_unknown');
-    expect(await duplicate).toBe('network_outcome_unknown');
+    expect(await first).toBe(unknownCode);
+    expect(await duplicate).toBe(unknownCode);
     const saved = caller.state().permissionSubmissions[0]!;
     expect(saved.phase).toBe('unknown');
     expect(saved.rootSessionId).toBe('a');
@@ -402,6 +406,46 @@ test('main duplicate permission saves share one original request; unknown intent
     expect(writes).toBe(1);
   } finally {
     release();
+    await caller.close();
+  }
+});
+
+test('a failed mode change renews its consumed observation without a Store change', async () => {
+  const source = port();
+  const setMode = source.client.setPermissionMode.bind(source.client);
+  let attempts = 0;
+  source.client.setPermissionMode = async (...args) => {
+    if (++attempts === 1) throw new ClientError('host_control_conflict');
+    return setMode(...args);
+  };
+  const caller = new NativeCaller(source.client, () => {});
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    const first = (await caller.invoke({
+      method: 'select',
+      generation,
+      sessionId: 'a',
+    })) as NativeState;
+    const request = {
+      method: 'permission.mode' as const,
+      generation,
+      observationId: first.selection!.permissions!.observationId,
+      mode: 'full' as const,
+      makeDefault: false,
+    };
+    expect(await code(caller.invoke(request))).toBe('host_control_conflict');
+    expect(caller.state().permissionSubmissions[0]).toMatchObject({
+      phase: 'failed',
+      observationId: request.observationId,
+    });
+    const facts = () => caller.state().selection?.permissions;
+    await until(() => (facts()?.observationId ?? 0) > request.observationId);
+    expect(facts()!.mode.mode).toBe('auto');
+    expect(await code(caller.invoke({ ...request, observationId: facts()!.observationId }))).toBe(
+      'success',
+    );
+    expect(attempts).toBe(2);
+  } finally {
     await caller.close();
   }
 });

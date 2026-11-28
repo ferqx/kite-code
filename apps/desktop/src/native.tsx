@@ -351,6 +351,8 @@ function nativeHistoryScope(state: NativeState | undefined): string | undefined 
     : undefined;
 }
 
+type PermissionMode = 'accept_edits' | 'auto' | 'full';
+
 function NativeDesktopContent({
   bridge,
   nativeWindow,
@@ -368,8 +370,13 @@ function NativeDesktopContent({
     [bridge],
   );
   const changeCurrentPermission = useNativePermissionChange(
-    (mode) => void write(() => setPermissionMode(mode, false)),
+    (mode) => void write(() => switchPermissionMode(mode)),
   );
+  const [permissionChoice, setPermissionChoice] = useState<{
+    scope: string;
+    mode: PermissionMode;
+    revision?: string;
+  }>();
   const [interactionHistoryOpen, setInteractionHistoryOpen] = useState(false);
   const [startup, setStartup] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [startupError, setStartupError] = useState('');
@@ -2108,9 +2115,36 @@ function NativeDesktopContent({
     (state?.selection?.permissionUnavailable && !state.selection.viewLoading) ||
     state?.backgroundUnavailable ||
     state?.callerUnavailable;
-  const composerPermission = !permissionFailed
-    ? state?.selection?.permissions?.mode.mode
-    : undefined;
+  const permissionFacts = !permissionFailed ? state?.selection?.permissions : undefined;
+  const composerPermission = permissionFacts?.mode.mode;
+  const permissionScope = nativeHistoryScope(state);
+  const observedPermissionRevision = permissionFacts?.mode.revision;
+  const permissionChoiceObserved =
+    permissionChoice?.revision !== undefined &&
+    observedPermissionRevision !== undefined &&
+    BigInt(observedPermissionRevision) >= BigInt(permissionChoice.revision);
+  const pendingPermissionChoice =
+    permissionChoice?.scope === permissionScope && !permissionChoiceObserved
+      ? permissionChoice
+      : undefined;
+  useEffect(() => {
+    if (permissionChoice && !pendingPermissionChoice)
+      setPermissionChoice((current) => (current === permissionChoice ? undefined : current));
+  }, [permissionChoice, pendingPermissionChoice]);
+  const hasUnresolvedPermission = (state?.permissionSubmissions ?? []).some((submission) =>
+    ['saved', 'submitting', 'unknown'].includes(submission.phase),
+  );
+  const waitingForPermissionReadback = state?.permissionSubmissions.some(
+    (submission) =>
+      submission.kind === 'permission.mode' &&
+      submission.sessionId === permissionFacts?.mode.sessionId &&
+      submission.intent.expectedStoreId === permissionFacts.mode.storeId &&
+      ((submission.phase === 'failed' &&
+        submission.observationId === permissionFacts.observationId) ||
+        (submission.receipt?.kind === 'permission.mode' &&
+          submission.receipt.state === 'applied' &&
+          BigInt(submission.receipt.receipt.revision) > BigInt(permissionFacts.mode.revision))),
+  );
   const choiceKey = JSON.stringify([
     selection?.storeId,
     selection?.session.workspaceId,
@@ -3031,7 +3065,7 @@ function NativeDesktopContent({
       }
     }, requiresHistory);
   }
-  async function setPermissionMode(mode: 'accept_edits' | 'auto' | 'full', makeDefault: boolean) {
+  async function setPermissionMode(mode: PermissionMode, makeDefault: boolean) {
     if (!bridge || !selection?.permissions || !state) throw Error('permission_facts_unavailable');
     const sessionId = selection.session.id;
     const receipt = await bridge.request({
@@ -3041,13 +3075,69 @@ function NativeDesktopContent({
       mode,
       makeDefault,
     });
-    if (receipt && 'state' in receipt && receipt.state === 'applied')
+    if (
+      !receipt ||
+      !('kind' in receipt) ||
+      receipt.kind !== 'permission.mode' ||
+      !('state' in receipt)
+    )
+      throw Error('permission_outcome_unknown');
+    if (receipt.state === 'applied')
       setFirstSubmission((previous) =>
         previous?.creation.sessionId === sessionId
           ? { ...previous, permissionMode: mode }
           : previous,
       );
-    await refresh();
+    return receipt;
+  }
+  async function switchPermissionMode(mode: PermissionMode) {
+    if (
+      !permissionScope ||
+      !permissionFacts ||
+      !selection ||
+      selected.current !== selection.session.id ||
+      mode === composerPermission ||
+      pendingPermissionChoice ||
+      hasUnresolvedPermission ||
+      waitingForPermissionReadback
+    )
+      return;
+    const choice = { scope: permissionScope, mode };
+    setPermissionChoice(choice);
+    showOperationMessage();
+    try {
+      const result = await setPermissionMode(mode, false);
+      if (result.state === 'applied') {
+        setPermissionChoice((current) =>
+          current === choice ? { ...choice, revision: result.receipt.revision } : current,
+        );
+        return;
+      }
+      throw Error(
+        result.state === 'failed'
+          ? (result.receipt.code ?? 'permission_change_failed')
+          : 'permission_outcome_unknown',
+      );
+    } catch (error) {
+      setPermissionChoice((current) => (current === choice ? undefined : current));
+      const code = (error as Error)?.message;
+      showOperationMessage(
+        [
+          'permission_outcome_unknown',
+          'network_outcome_unknown',
+          'mutation_outcome_unknown',
+          'mutation_incomplete',
+          'connection_superseded',
+          'permission_scope_mismatch',
+        ].includes(code)
+          ? '权限切换结果待确认。'
+          : code === 'host_control_conflict'
+            ? '权限已在其他位置更新，请按最新模式重新选择。'
+            : '权限切换失败，请重试。',
+      );
+      // Keep the write lock until Main's failed or unresolved submission is visible.
+      await refresh();
+    }
   }
   async function stopCurrentRun() {
     if (
@@ -4872,6 +4962,7 @@ function NativeDesktopContent({
     selection && composerSnapshots.current.get(imageScope(selection.storeId, selection.session.id));
   const hasPermissionDisplay = retainedComposer?.sourceId === composerSource.current.id;
   const displayedPermission =
+    (!permissionFailed ? pendingPermissionChoice?.mode : undefined) ??
     composerPermission ??
     (!permissionFailed && selection?.viewLoading && hasPermissionDisplay
       ? retainedComposer?.permission
@@ -6259,7 +6350,14 @@ function NativeDesktopContent({
                 ['saved', 'submitting', 'unknown'].includes(value.phase),
               )
             }
-            onSetMode={selection.permissions?.trust.trusted ? setPermissionMode : undefined}
+            onSetMode={
+              selection.permissions?.trust.trusted
+                ? async (mode, makeDefault) => {
+                    await setPermissionMode(mode, makeDefault);
+                    await refresh();
+                  }
+                : undefined
+            }
             onSetTrust={
               selection.permissions
                 ? async (trusted) => {
@@ -8254,14 +8352,17 @@ function NativeDesktopContent({
                     pending ||
                     !!permissionFailed ||
                     !composerPermission ||
-                    state.permissionSubmissions.some((value) =>
-                      ['saved', 'submitting', 'unknown'].includes(value.phase),
+                    !!pendingPermissionChoice ||
+                    !!waitingForPermissionReadback ||
+                    hasUnresolvedPermission,
+                  permissionPending:
+                    !!pendingPermissionChoice ||
+                    !!waitingForPermissionReadback ||
+                    state.permissionSubmissions.some(
+                      (value) =>
+                        value.sessionId === selection.session.id &&
+                        ['saved', 'submitting', 'unknown'].includes(value.phase),
                     ),
-                  permissionPending: state.permissionSubmissions.some(
-                    (value) =>
-                      value.sessionId === selection.session.id &&
-                      ['saved', 'submitting', 'unknown'].includes(value.phase),
-                  ),
                   onPermissionChange:
                     displayedPermission || (selection.viewLoading && !hasPermissionDisplay)
                       ? changeCurrentPermission

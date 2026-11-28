@@ -155,6 +155,7 @@ export interface PermissionSubmission {
   readonly sessionId: string;
   readonly rootSessionId: string;
   readonly workspaceId: string;
+  readonly observationId?: number;
   readonly intent: SetPermissionModeRequest | SetWorkspaceTrustRequest;
   readonly kind: 'permission.mode' | 'workspace.trust';
   readonly phase: 'saved' | 'submitting' | 'applied' | 'unknown' | 'failed';
@@ -1381,6 +1382,7 @@ export class DesktopController {
         sessionId: facts.mode.sessionId,
         rootSessionId: facts.mode.scopeSessionId,
         workspaceId: facts.trust.workspaceId,
+        observationId,
         intent,
         kind,
         phase: 'saved',
@@ -1410,6 +1412,8 @@ export class DesktopController {
           error instanceof ClientError &&
           ![
             'network_outcome_unknown',
+            'mutation_outcome_unknown',
+            'mutation_incomplete',
             'connection_superseded',
             'permission_scope_mismatch',
           ].includes(error.code);
