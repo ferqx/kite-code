@@ -3,7 +3,254 @@ import path from 'node:path';
 import { type Browser, expect, type Locator, type Page } from 'playwright/test';
 import type {} from './session-shell-browser.fixture';
 
+export async function verifySidebarNavigationState(browser: Pick<Browser, 'newPage'>, url: string) {
+  const page = await browser.newPage({ viewport: { width: 1200, height: 750 } });
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  try {
+    await page.goto(`${url}?page-navigation=windows&worktree-navigation&manage-sessions`);
+    const title = page.locator('.session-header .breadcrumb strong');
+    const project = (name: string | RegExp) => page.locator('.space-row').filter({ hasText: name });
+    const worktree = project('Worktree project');
+    const workspace = project(/^Workspace$/);
+    const tasks = page.getByRole('button', { name: '定时任务', exact: true });
+    const session = (name: string) => page.getByRole('button', { name, exact: true });
+    const back = page.getByRole('button', { name: '后退', exact: true });
+    const draft = page.locator('.composer [role="textbox"]');
+    const tabs = page.getByRole('button', { name: '标签页', exact: true });
+    const strip = page.getByRole('tablist', { name: '右侧栏标签页' });
+    const details = page.locator('#details');
+    const viewport = page.locator('.conversation-viewport');
+    const userMessage = viewport.getByRole('article', { name: '用户消息' });
+    const observe = () =>
+      page.evaluate(async () => {
+        for (let frame = 0; frame < 8; frame++) await new Promise(requestAnimationFrame);
+      });
+    await expect(title).toHaveText('Session A');
+    await expect(draft).toBeEditable();
+    await draft.fill('Sidebar navigation draft A');
+    await page.waitForFunction(() =>
+      window.sessionShellFixture.requests.some(
+        (request) =>
+          request.method === 'draft.write' && request.content === 'Sidebar navigation draft A',
+      ),
+    );
+
+    const monitor = await page.evaluateHandle(() => {
+      const directory = document.querySelector(
+        '.workspace-directory [data-slot="scroll-area-viewport"]',
+      );
+      const frames = [] as Array<{
+        title: string;
+        projects: (string | null)[];
+        sameDirectory: boolean;
+        detailsWidth: number;
+        expanded: string | null | undefined;
+        selectedTab: string | null | undefined;
+        messages: (string | null)[];
+        draft: string | null | undefined;
+        scroll: number | undefined;
+      }>;
+      let frame = 0;
+      const capture = () => {
+        frames.push({
+          title: document.querySelector('.session-header .breadcrumb strong')?.textContent ?? '',
+          projects: Array.from(document.querySelectorAll('.space-row'), (row) =>
+            row.getAttribute('aria-expanded'),
+          ),
+          sameDirectory:
+            directory ===
+            document.querySelector('.workspace-directory [data-slot="scroll-area-viewport"]'),
+          detailsWidth: document.querySelector('#details')!.getBoundingClientRect().width,
+          expanded: document.querySelector('.session-tabs-toggle')?.getAttribute('aria-expanded'),
+          selectedTab: document.querySelector(
+            '#session-tabs:not([hidden]) [role="tab"][aria-selected="true"]',
+          )?.textContent,
+          messages: Array.from(
+            document.querySelectorAll('.conversation-viewport [aria-label="用户消息"] p'),
+            (row) => row.textContent,
+          ),
+          draft: document.querySelector('.composer [role="textbox"]')?.textContent,
+          scroll: document.querySelector('.conversation-viewport')?.scrollTop,
+        });
+        frame = requestAnimationFrame(capture);
+      };
+      frame = requestAnimationFrame(capture);
+      return { frames, stop: () => cancelAnimationFrame(frame) };
+    });
+
+    await worktree.click();
+    await tasks.click();
+    await expect(title).toHaveText('定时任务');
+    await expect(worktree).toHaveAttribute('aria-expanded', 'false', { timeout: 1500 });
+    await expect(workspace).toHaveAttribute('aria-expanded', 'true');
+    await observe();
+    await back.click();
+    await expect(title).toHaveText('Session A');
+    await expect(draft).toBeEditable();
+    await expect(draft).toHaveText('Sidebar navigation draft A');
+    await expect(worktree).toHaveAttribute('aria-expanded', 'false');
+    await worktree.click();
+
+    await tabs.click();
+    await expect(strip.getByRole('tab')).toHaveCount(1);
+    await page.getByRole('button', { name: '新建标签页', exact: true }).click();
+    await expect(strip.getByRole('tab')).toHaveCount(2);
+    await expect(strip.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
+    const tabIdentity = async () =>
+      (await strip.getByRole('tab').nth(1).getAttribute('id'))?.split('-trigger-').at(-1);
+    const activeTab = await tabIdentity();
+    await viewport.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await expect(viewport).toHaveJSProperty('scrollTop', 0);
+    const switchStart = await monitor.evaluate(({ frames }) => frames.length);
+    await page.evaluate(() => window.sessionShellFixture.hold());
+    await session('Session B').click();
+    await expect(title).toHaveText('Session B');
+    await page.waitForFunction(() => window.sessionShellFixture.pending('selection') === 1);
+    await expect
+      .poll(() => details.evaluate((node) => node.getBoundingClientRect().width), { timeout: 1500 })
+      .toBe(0);
+    await expect(strip).toBeHidden();
+    await observe();
+    await page.evaluate(() => window.sessionShellFixture.resume());
+    await expect(draft).toBeEditable();
+    await expect(userMessage.getByText('Question b', { exact: true })).toBeVisible();
+
+    await page.evaluate(() => window.sessionShellFixture.hold());
+    await session('Session A').click();
+    await expect(title).toHaveText('Session A');
+    await page.waitForFunction(() => window.sessionShellFixture.pending('selection') === 1);
+    await expect(tabs).toHaveAttribute('aria-expanded', 'true', { timeout: 1500 });
+    await expect(draft).toHaveText('Sidebar navigation draft A');
+    await observe();
+    await page.evaluate(() => window.sessionShellFixture.resume());
+    await expect(draft).toBeEditable();
+    await expect(strip.getByRole('tab')).toHaveCount(2);
+    assert.ok(activeTab?.startsWith('browser-'));
+    assert.equal(await tabIdentity(), activeTab);
+    await expect(strip.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
+    await expect(viewport).toHaveJSProperty('scrollTop', 0);
+
+    const frames = await monitor.evaluate(({ frames }) => frames);
+    const scheduled = frames.filter((frame) => frame.title === '定时任务');
+    const switched = frames.slice(switchStart);
+    const sessionB = switched.filter((frame) => frame.title === 'Session B');
+    const returned = switched
+      .slice(switched.findIndex((frame) => frame.title === 'Session B'))
+      .filter((frame) => frame.title === 'Session A');
+    assert.ok(scheduled.length >= 8 && sessionB.length >= 8 && returned.length >= 8);
+    assert.ok(frames.every((frame) => frame.sameDirectory));
+    assert.ok(scheduled.every((frame) => frame.projects.includes('false')));
+    assert.ok(
+      sessionB.every(
+        (frame) =>
+          frame.detailsWidth === 0 &&
+          frame.expanded === 'false' &&
+          !frame.selectedTab &&
+          frame.messages.length <= 1 &&
+          frame.messages.every((text) => text === 'Question b'),
+      ),
+      JSON.stringify(sessionB),
+    );
+    assert.ok(
+      returned.every(
+        (frame) =>
+          frame.detailsWidth > 0 &&
+          frame.expanded === 'true' &&
+          frame.messages.length === 1 &&
+          frame.messages[0] === 'Question a' &&
+          frame.draft === 'Sidebar navigation draft A' &&
+          frame.scroll === 0,
+      ),
+      JSON.stringify(returned),
+    );
+
+    await tabs.click();
+    await expect(tabs).toHaveAttribute('aria-expanded', 'false');
+    await tasks.click();
+    await expect(title).toHaveText('定时任务');
+    await back.click();
+    await expect(title).toHaveText('Session A');
+    await expect(tabs).toHaveAttribute('aria-expanded', 'false');
+    await expect(draft).toBeEditable();
+    await tabs.click();
+    await expect(strip.getByRole('tab')).toHaveCount(2);
+    assert.equal(await tabIdentity(), activeTab);
+
+    await page.getByRole('button', { name: '变更', exact: true }).click();
+    await expect(strip.getByRole('tab', { name: '变更', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await observe();
+    const handle = page.getByRole('separator', { name: '会话详情栏宽度' });
+    const initialWidth = await details.evaluate((node) => node.getBoundingClientRect().width);
+    const bounds = (await handle.boundingBox())!;
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 100);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + bounds.width / 2 + 110, bounds.y + 100, { steps: 8 });
+    await page.mouse.up();
+    const width = await details.evaluate((node) => node.getBoundingClientRect().width);
+    assert.ok(width > 320 && initialWidth - width > 50, JSON.stringify({ initialWidth, width }));
+
+    await session('Session B').click();
+    await expect(draft).toBeEditable();
+    await tabs.click();
+    await expect(strip).toBeVisible();
+    const widthStart = await monitor.evaluate(({ frames }) => frames.length);
+    for (const name of ['Session A', 'Session B', 'Session A']) {
+      await page.evaluate(() => window.sessionShellFixture.hold());
+      await session(name).click();
+      await expect(title).toHaveText(name);
+      await page.waitForFunction(() => window.sessionShellFixture.pending('selection') === 1);
+      await observe();
+      await page.evaluate(() => window.sessionShellFixture.resume());
+      await expect(draft).toBeEditable();
+      await observe();
+    }
+    const widthFrames = await monitor.evaluate(({ frames, stop }, start) => {
+      stop();
+      return frames.slice(start).map(({ title, detailsWidth }) => ({ title, detailsWidth }));
+    }, widthStart);
+    assert.ok(widthFrames.length >= 24);
+    assert.ok(
+      widthFrames.every((frame) => Math.abs(frame.detailsWidth - width) < 1),
+      JSON.stringify({ width, widthFrames }),
+    );
+    await expect(strip.getByRole('tab', { name: '变更', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    const dockWidth = () => details.evaluate((node) => node.getBoundingClientRect().width);
+    await page.setViewportSize({ width: 900, height: 750 });
+    await expect.poll(dockWidth).toBeLessThan(width - 50);
+    await expect(strip).toBeVisible();
+    await page.setViewportSize({ width: 820, height: 750 });
+    await expect.poll(dockWidth).toBe(0);
+    await expect(strip).toBeHidden();
+    await page.setViewportSize({ width: 1200, height: 750 });
+    await expect.poll(async () => Math.abs((await dockWidth()) - width)).toBeLessThan(1);
+    await expect(strip.getByRole('tab', { name: '变更', exact: true })).toBeVisible();
+    await expect(draft).toHaveText('Sidebar navigation draft A');
+    assert.deepEqual(errors, []);
+    return {
+      case: 'sidebar navigation state',
+      frames: frames.length,
+      scheduled: scheduled.length,
+      sessionB: sessionB.length,
+      returned: returned.length,
+      width,
+      widthFrames: widthFrames.length,
+    };
+  } finally {
+    await page.close();
+  }
+}
+
 export async function verifyPageNavigation(browser: Browser, url: string, artifact: string) {
+  const sidebarState = await verifySidebarNavigationState(browser, url);
   const cases = [];
   for (const platform of ['windows', 'macos'] as const) {
     const page = await browser.newPage({
@@ -462,7 +709,7 @@ export async function verifyPageNavigation(browser: Browser, url: string, artifa
       await page.close();
     }
   }
-  return cases;
+  return [sidebarState, ...cases];
 }
 
 function sampleDialogOpening(dialog: Locator) {

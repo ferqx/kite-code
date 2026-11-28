@@ -358,7 +358,7 @@ export function SessionPage(props: SessionPageProps) {
       props.renderTrajectory !== undefined ||
       props.renderFile !== undefined);
   const tabModel = useSessionTabs(
-    hasTabs ? (props.tabsScopeKey ?? props.readingKey) : 'inactive',
+    hasTabs ? (props.tabsScopeKey ?? props.readingKey) : undefined,
     props.closeBrowser,
     hasTabs ? props.restoreBrowser : undefined,
     props.browserRestoreKey,
@@ -405,24 +405,16 @@ function SessionPageContent({
   const [pendingTabsClose, setPendingTabsClose] = useState<{ scope?: string; id: string }>();
   const directDetails = useRef(false);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
-  const tabsScopeKey = props.tabsScopeKey ?? props.readingKey;
-  const tabsIntent = useRef<{ scope?: string; key?: string }>({});
-  const detailsScope = useRef({ scope: tabsScopeKey, settling: false });
-  if (tabsIntent.current.scope !== tabsScopeKey) {
-    tabsIntent.current = { scope: tabsScopeKey };
-  }
-  const [, tabsChanged] = useState(0);
-  const setTabsKey = useCallback((key: string | undefined) => {
-    if (tabsIntent.current.key === key) return;
-    tabsIntent.current.key = key;
-    tabsChanged((value) => value + 1);
-  }, []);
-  const tabsKey = tabsIntent.current.key;
+  const tabsScopeKey = hasTabs ? (props.tabsScopeKey ?? props.readingKey) : undefined;
+  const currentTabsScope = useRef(tabsScopeKey);
+  currentTabsScope.current = tabsScopeKey;
+  const detailsScope = useRef({ scope: tabsScopeKey, pending: false });
+  const { setOpen: setTabsOpen } = tabModel;
   const [detailsCollapsed, setDetailsCollapsed] = useState<boolean>();
   const presentedTabsKey = useRef<string | undefined>(undefined);
   const childTabOpener = useRef(tabModel.openChild);
   childTabOpener.current = tabModel.openChild;
-  const tabsOpen = tabsKey === tabsScopeKey && hasTabs;
+  const tabsOpen = tabModel.open === true && hasTabs;
   const scheduledEditorGeneration = useRef(0);
   const detailsOpeningWidth = useRef<number | undefined>(undefined);
   const [scheduledEditor, setScheduledEditor] = useState<{
@@ -476,8 +468,8 @@ function SessionPageContent({
   const previousEnvironmentMode = useRef(environmentMode);
   const hostDetailsOpen = !!props.detailPanel;
   useLayoutEffect(() => {
-    if (hostDetailsOpen) setTabsKey(undefined);
-  }, [hostDetailsOpen, setTabsKey]);
+    if (hostDetailsOpen) setTabsOpen((open) => (open === true ? undefined : open));
+  }, [hostDetailsOpen, setTabsOpen]);
   const detailClose = useRef(props.detailPanel?.onClose);
   detailClose.current = props.detailPanel?.onClose;
   const workspaceDetails = !!props.workspaceTab || !!props.fileChangesContent;
@@ -485,13 +477,8 @@ function SessionPageContent({
   const [scheduledEditorOverlay, setScheduledEditorOverlay] = useState(false);
   const tabsToggle = useRef<HTMLButtonElement>(null);
   const [dockFits, setDockFits] = useState(true);
-  const dockWidth = useRef<
-    { scope: string; groupWidth: number; pixels: number; restoring: boolean } | undefined
-  >(undefined);
-  useLayoutEffect(() => {
-    // A new dock intent must not inherit a queued width restoration.
-    if (!tabsOpen || dockWidth.current?.scope !== tabsScopeKey) dockWidth.current = undefined;
-  }, [tabsScopeKey, tabsOpen]);
+  const dockWidth = useRef<number | undefined>(undefined);
+  const initialWideDockSized = useRef(false);
   useLayoutEffect(() => {
     const group = contentGroupElement.current;
     if (!group) return;
@@ -509,7 +496,6 @@ function SessionPageContent({
       setScheduledEditorOverlay(overlay);
       const fits = width >= SESSION_DOCK_MIN_WIDTH;
       if (!fits && !rightSidebarFormOpen) {
-        if (dockWidth.current) dockWidth.current.restoring = true;
         const focused = group.ownerDocument.activeElement;
         if (focused?.closest('#details, #details-resize')) tabsToggle.current?.focus();
       }
@@ -555,13 +541,51 @@ function SessionPageContent({
           tabModel.tabs.some((tab) => tab.id === tabModel.active && tab.kind === 'trajectory')
         ? '85%'
         : '640px',
-    groupResizeBehavior: props.scheduledTasks
-      ? ('preserve-pixel-size' as const)
-      : ('preserve-relative-size' as const),
+    groupResizeBehavior:
+      hasTabs || props.scheduledTasks
+        ? ('preserve-pixel-size' as const)
+        : ('preserve-relative-size' as const),
     collapsible: true,
   };
   const rightSidebarOpen = canShowDetails && (hostDetailsOpen || tabsOpen || rightSidebarFormOpen);
+  const dockOpen = rightSidebarOpen && tabsOpen && !hostDetailsOpen;
+  const dockLayout = useRef({ open: dockOpen, maxSize: detailsSizing.maxSize });
+  dockLayout.current = { open: dockOpen, maxSize: detailsSizing.maxSize };
+  const restoreDockWidth = useCallback(() => {
+    const preferred = dockWidth.current;
+    const { open, maxSize } = dockLayout.current;
+    const panel = detailsPanel.current;
+    const available = contentGroupElement.current?.getBoundingClientRect().width ?? 0;
+    if (preferred === undefined || !open || !panel || available < SESSION_DOCK_MIN_WIDTH)
+      return false;
+    const maxWidth = maxSize === '85%' ? available * 0.85 : Number.parseFloat(maxSize);
+    const width = Math.max(
+      RIGHT_SIDEBAR_MIN_WIDTH,
+      Math.min(preferred, available - SESSION_CONTENT_MIN_WIDTH, maxWidth),
+    );
+    if (Math.abs((panel.getSize().asPercentage * available) / 100 - width) > 0.5)
+      panel.resize(`${width}px`);
+    return true;
+  }, []);
+  useLayoutEffect(() => {
+    if (dockOpen && detailsSizing.maxSize !== '0px') restoreDockWidth();
+  }, [dockOpen, detailsSizing.maxSize, restoreDockWidth]);
+  const prepareWideDock = useCallback(() => {
+    const panel = detailsPanel.current;
+    if (
+      dockWidth.current !== undefined ||
+      initialWideDockSized.current ||
+      !panel ||
+      panel.isCollapsed()
+    )
+      return;
+    panel.resize('62%');
+    initialWideDockSized.current = true;
+  }, []);
   const detailsPending = !!(props.loading || props.browserPending || tabModel.restoring);
+  const tabReaders = useRef({ scope: tabsScopeKey, ready: !detailsPending });
+  if (tabReaders.current.scope !== tabsScopeKey || (!tabReaders.current.ready && !detailsPending))
+    tabReaders.current = { scope: tabsScopeKey, ready: !detailsPending };
   const closingTabsVisible =
     !!pendingTabsClose &&
     pendingTabsClose.scope === tabsScopeKey &&
@@ -600,11 +624,11 @@ function SessionPageContent({
         commit();
         return;
       }
-      const scope = tabsIntent.current.scope;
+      const scope = currentTabsScope.current;
       const scheduled = requestAnimationFrame(() => {
         if (frame.current !== scheduled) return;
         frame.current = undefined;
-        if (panel === detailsPanel && tabsIntent.current.scope !== scope) return;
+        if (panel === detailsPanel && currentTabsScope.current !== scope) return;
         // The header affordance and the panel layout must start in one commit.
         commit?.();
         const group = groupElement.current;
@@ -613,15 +637,7 @@ function SessionPageContent({
         if (!target) return;
         const openingWidth =
           open && panel === detailsPanel ? detailsOpeningWidth.current : undefined;
-        const saved = open && panel === detailsPanel ? dockWidth.current : undefined;
-        if (saved?.restoring && openingWidth === undefined) {
-          const available = group.getBoundingClientRect().width;
-          if (available < SESSION_DOCK_MIN_WIDTH) return;
-          const width = Math.min(saved.pixels, available - SESSION_CONTENT_MIN_WIDTH);
-          // A temporarily clamped allocation is not a new user preference.
-          if (available >= saved.groupWidth && width >= saved.pixels) saved.restoring = false;
-          if (target.isCollapsed() || Math.abs(target.getSize().inPixels - width) > 1)
-            target.resize(`${width}px`);
+        if (open && panel === detailsPanel && openingWidth === undefined && restoreDockWidth()) {
           return;
         }
         if (
@@ -645,7 +661,7 @@ function SessionPageContent({
       });
       frame.current = scheduled;
     },
-    [],
+    [restoreDockWidth],
   );
   const setSidebarOpen = useCallback(
     (open: boolean) => {
@@ -721,31 +737,25 @@ function SessionPageContent({
     observer.observe(group);
     return () => observer.disconnect();
   }, [scheduledEditor, props.scheduledTasks, expandDetails]);
-  const dismissedBrowserReveals = useRef(new Set<string>());
-  const cancelDetailsLayout = useCallback(() => {
-    if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
-    detailsPanelFrame.current = undefined;
-    setPendingTabsClose(undefined);
-  }, []);
   const settleDetails = useCallback(
     (open: boolean) => {
+      if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
+      detailsPanelFrame.current = undefined;
       directDetails.current = true;
-      cancelDetailsLayout();
-      if (open) detailsPanel.current?.expand();
-      else detailsPanel.current?.collapse();
+      if (open) {
+        if (!restoreDockWidth()) detailsPanel.current?.expand();
+      } else detailsPanel.current?.collapse();
     },
-    [cancelDetailsLayout],
+    [restoreDockWidth],
   );
   const changeTabsOpen = useCallback(
     (open: boolean, deferLayout = true) => {
-      // Closing a host panel can replace its pending layout frame, not this intent.
-      if (open) dismissedBrowserReveals.current.delete(tabsScopeKey);
-      else dismissedBrowserReveals.current.add(tabsScopeKey);
+      if (currentTabsScope.current !== tabsScopeKey) return;
       const group = contentGroupElement.current;
       const keepPage =
         !open &&
         deferLayout &&
-        tabsIntent.current.key === tabsScopeKey &&
+        tabsOpen &&
         presentedTabsKey.current === tabsScopeKey &&
         !props.covered &&
         !hostDetailsOpen &&
@@ -759,7 +769,7 @@ function SessionPageContent({
       // The library re-registers panels when this intent changes. Keep the
       // original page until the queued layout can commit the closed width.
       setPendingTabsClose(keepPage ? { scope: tabsScopeKey, id: tabModel.active } : undefined);
-      setTabsKey(open ? tabsScopeKey : undefined);
+      setTabsOpen(open);
       if (deferLayout) {
         // Ordinary tabs retire with the intent, so reclaim their width in the same update.
         if (!open && !keepPage) detailsPanel.current?.collapse();
@@ -774,7 +784,8 @@ function SessionPageContent({
     [
       schedulePanelChange,
       tabsScopeKey,
-      setTabsKey,
+      setTabsOpen,
+      tabsOpen,
       settleDetails,
       finishTabsClose,
       props.covered,
@@ -819,7 +830,7 @@ function SessionPageContent({
       props.loading ||
       props.covered ||
       hostDetailsOpen ||
-      dismissedBrowserReveals.current.has(tabsScopeKey) ||
+      tabModel.open === false ||
       tabModel.restoring ||
       tabModel.restoreIssue ||
       !tabModel.tabs.some((tab) => tab.kind === 'browser' && tab.id === id)
@@ -831,12 +842,12 @@ function SessionPageContent({
     changeTabsOpen(true, false);
   }, [
     tabModel.revealBrowserId,
+    tabModel.open,
     tabModel.restoring,
     tabModel.restoreIssue,
     tabModel.select,
     tabModel.tabs,
     hasTabs,
-    tabsScopeKey,
     props.loading,
     props.covered,
     hostDetailsOpen,
@@ -918,7 +929,7 @@ function SessionPageContent({
     }
     detailClose.current?.();
     changeTabsOpen(true);
-    const frame = requestAnimationFrame(() => detailsPanel.current?.resize('62%'));
+    const frame = requestAnimationFrame(prepareWideDock);
     return () => cancelAnimationFrame(frame);
   }, [
     workspaceRequestId,
@@ -928,10 +939,8 @@ function SessionPageContent({
     changeTabsOpen,
     tabModel.restoring,
     tabModel.restoreIssue,
+    prepareWideDock,
   ]);
-  const changesLayout = useRef({ scope: tabsScopeKey, prepared: false });
-  if (changesLayout.current.scope !== tabsScopeKey)
-    changesLayout.current = { scope: tabsScopeKey, prepared: false };
   const activeChanges = tabModel.tabs.some(
     (tab) => tab.id === tabModel.active && tab.kind === 'changes',
   );
@@ -948,21 +957,12 @@ function SessionPageContent({
       hostDetailsOpen ||
       tabModel.restoring ||
       tabModel.restoreIssue ||
-      changesLayout.current.prepared
+      dockWidth.current !== undefined ||
+      initialWideDockSized.current
     )
       return;
     const frame = requestAnimationFrame(() => {
-      const panel = detailsPanel.current;
-      if (
-        !panel ||
-        panel.isCollapsed() ||
-        changesLayout.current.scope !== tabsScopeKey ||
-        changesLayout.current.prepared
-      )
-        return;
-      // Prepare the first review only. Later selection and refresh retain user sizing.
-      panel.resize('62%');
-      changesLayout.current = { scope: tabsScopeKey, prepared: true };
+      if (currentTabsScope.current === tabsScopeKey) prepareWideDock();
     });
     return () => cancelAnimationFrame(frame);
   }, [
@@ -976,6 +976,7 @@ function SessionPageContent({
     hostDetailsOpen,
     tabModel.restoring,
     tabModel.restoreIssue,
+    prepareWideDock,
   ]);
   const trajectoryOpener = useRef(tabModel.openTrajectory);
   trajectoryOpener.current = tabModel.openTrajectory;
@@ -1097,27 +1098,19 @@ function SessionPageContent({
     if (environmentAnimationKey !== undefined) setEnvironmentAnimationKey(undefined);
   }, [props.readingKey, environmentAnimationKey]);
   useLayoutEffect(() => {
-    if (detailsScope.current.scope !== tabsScopeKey) {
-      detailsScope.current = { scope: tabsScopeKey, settling: true };
-      cancelDetailsLayout();
+    const changedScope = detailsScope.current.scope !== tabsScopeKey;
+    const settled = !detailsPending && detailsScope.current.pending;
+    if (!changedScope && !settled) return;
+    detailsScope.current = { scope: tabsScopeKey, pending: detailsPending };
+    // Apply the new owner's layout before paint, even while its readers are pending.
+    if (changedScope) {
+      detailsOpeningWidth.current = undefined;
+      settleDetails(rightSidebarOpen);
+    } else if (!rightSidebarOpen && !closingTabsVisible && !detailsPanel.current?.isCollapsed()) {
+      // The panel can re-register its constraints as the target's content arrives.
+      detailsPanel.current?.collapse();
     }
-    if (!detailsScope.current.settling) return;
-    // The old owner's queued panel action must never run on the new owner.
-    // Pending selection/restore is not an empty target or a user-close intent.
-    const open =
-      canShowDetails && (rightSidebarOpen || (tabsIntent.current.key === tabsScopeKey && hasTabs));
-    if (!open && detailsPending) return;
-    settleDetails(open);
-    detailsScope.current.settling = false;
-  }, [
-    tabsScopeKey,
-    rightSidebarOpen,
-    canShowDetails,
-    hasTabs,
-    detailsPending,
-    cancelDetailsLayout,
-    settleDetails,
-  ]);
+  }, [tabsScopeKey, detailsPending, rightSidebarOpen, closingTabsVisible, settleDetails]);
   useEffect(() => {
     if (!props.scheduledTasks) {
       scheduledEditorGeneration.current++;
@@ -1125,11 +1118,6 @@ function SessionPageContent({
     }
   }, [props.scheduledTasks]);
   useEffect(() => {
-    if (
-      detailsScope.current.scope !== tabsScopeKey ||
-      (detailsScope.current.settling && detailsPending)
-    )
-      return;
     const direct = directDetails.current;
     directDetails.current = false;
     if (!rightSidebarOpen) {
@@ -1139,10 +1127,12 @@ function SessionPageContent({
     if (!direct) expandDetails();
     const group = contentGroupElement.current;
     if (!group || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(expandDetails);
+    const observer = new ResizeObserver(() => {
+      if (currentTabsScope.current === tabsScopeKey) expandDetails();
+    });
     observer.observe(group);
     return () => observer.disconnect();
-  }, [tabsScopeKey, rightSidebarOpen, detailsPending, expandDetails, collapseDetails]);
+  }, [tabsScopeKey, rightSidebarOpen, expandDetails, collapseDetails]);
   useEffect(() => {
     const group = panelGroupElement.current;
     if (!sidebarOpen || !group || typeof ResizeObserver === 'undefined') return;
@@ -1478,7 +1468,9 @@ function SessionPageContent({
       messageNavigation
       loading={props.loading}
       initialPresentationPending={props.initialPresentationPending}
-      onPresentationReady={() => finishPresentation(presentationIdentity)}
+      onPresentationReady={
+        props.synchronizePresentation ? () => finishPresentation(presentationIdentity) : undefined
+      }
       selected={!!props.selected}
       emptyState={
         props.hideEmptyWelcome
@@ -1633,7 +1625,7 @@ function SessionPageContent({
             aria-hidden={!sidebarOpen}
             inert={!sidebarOpen}
           >
-            {sidebarPanel}
+            <NativeScrollbars enabled={!props.workbench}>{sidebarPanel}</NativeScrollbars>
           </div>
         </NavigationPanel>
         <ResizableHandle
@@ -1679,18 +1671,11 @@ function SessionPageContent({
                 const groupWidth = contentGroupElement.current?.getBoundingClientRect().width ?? 0;
                 if (
                   meta.isUserInteraction &&
-                  tabsOpen &&
+                  dockOpen &&
                   groupWidth >= SESSION_DOCK_MIN_WIDTH &&
                   (layout.details ?? 0) > 0
                 )
-                  dockWidth.current = {
-                    scope: tabsScopeKey,
-                    groupWidth,
-                    pixels: (groupWidth * layout.details!) / 100,
-                    restoring: false,
-                  };
-                if (meta.isUserInteraction && hasChangesWorkspace && activeChanges && tabsOpen)
-                  changesLayout.current = { scope: tabsScopeKey, prepared: true };
+                  dockWidth.current = (groupWidth * layout.details!) / 100;
                 if (
                   meta.isUserInteraction &&
                   rightSidebarOpen &&
@@ -1901,8 +1886,15 @@ function SessionPageContent({
                             }
                           : undefined
                       }
-                      visible={tabsVisible && !props.covered && !props.detailPanel}
-                      retainSelectedFile={tabsOpen && !props.covered && !hostDetailsOpen}
+                      visible={
+                        tabsVisible &&
+                        tabReaders.current.ready &&
+                        !props.covered &&
+                        !hostDetailsOpen
+                      }
+                      retainSelectedFile={
+                        tabsOpen && tabReaders.current.ready && !props.covered && !hostDetailsOpen
+                      }
                       present={tabsVisible && !props.covered && !props.detailPanel}
                       renderBrowser={props.renderBrowser}
                       renderChildSession={props.renderChildSession}

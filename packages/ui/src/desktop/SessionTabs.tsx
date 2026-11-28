@@ -13,8 +13,8 @@ import {
   RefreshIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import type { ReactNode } from 'react';
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import type { ReactNode, SetStateAction } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ChildAgentIcon } from './ApprovalHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { Button } from './ui';
@@ -141,6 +141,8 @@ interface SessionTabsHeaderPresentation {
   readonly dispatch: (action: SessionTabsAction) => void;
 }
 export interface SessionTabsModel {
+  readonly open?: boolean;
+  readonly setOpen: (update: SetStateAction<boolean | undefined>) => void;
   readonly restoredBrowserId?: string;
   readonly revealBrowserId?: string;
   readonly restoring?: boolean;
@@ -291,11 +293,20 @@ export function SessionBrowserToolbar(props: SessionBrowserToolbarProps) {
   );
 }
 
-function initialTabs(scope: string, restoring = false) {
+const RETAINED_TAB_SCOPES = 8;
+
+interface TabPresentation {
+  tabs: SessionTab[];
+  selected: string;
+  open?: boolean;
+}
+
+function initialTabs(scope: string | undefined, restoring = false, presentation?: TabPresentation) {
   return {
     scope,
-    tabs: [] as SessionTab[],
-    selected: '',
+    tabs: presentation?.tabs ?? ([] as SessionTab[]),
+    selected: presentation?.selected ?? '',
+    open: presentation?.open,
     restoring,
     restoreIssue: false,
     closeReveal: 0,
@@ -305,13 +316,14 @@ function initialTabs(scope: string, restoring = false) {
 }
 /** Lives above the responsive panel Group so resizing cannot discard tabs or browsing history. */
 export function useSessionTabs(
-  scope: string,
+  scope: string | undefined,
   closeBrowser?: ((id: string) => void) | ((id: string) => Promise<void>),
   restoreBrowser?: () => Promise<SessionBrowserRestorePage | null>,
   restoreKey?: string,
   browserPending = false,
   closeFile?: (target: SessionFileTarget) => void,
 ): SessionTabsModel {
+  const presentations = useRef(new Map<string, TabPresentation>());
   const [state, setState] = useState(() => initialTabs(scope, !!restoreBrowser));
   const [restoreAttempt, setRestoreAttempt] = useState(0);
   const restoreEpoch = useRef(restoreAttempt);
@@ -326,11 +338,35 @@ export function useSessionTabs(
   pending.current = browserPending || restorePending;
   let current = state;
   if (current.scope !== scope) {
-    current = initialTabs(scope, !!restoreBrowser);
+    current = initialTabs(
+      scope,
+      !!restoreBrowser,
+      scope === undefined ? undefined : presentations.current.get(scope),
+    );
     setState(current);
   }
   const latest = useRef(current);
   latest.current = current;
+  const { tabs, selected, open } = current;
+  useLayoutEffect(() => {
+    if (scope === undefined) return;
+    const retained = presentations.current;
+    retained.delete(scope);
+    if (tabs.length || open !== undefined) retained.set(scope, { tabs, selected, open });
+    if (retained.size > RETAINED_TAB_SCOPES) retained.delete(retained.keys().next().value!);
+  }, [scope, tabs, selected, open]);
+  const setOpen = useCallback(
+    (update: SetStateAction<boolean | undefined>) => {
+      const value = latest.current;
+      if (value.scope !== scope) return;
+      const open = typeof update === 'function' ? update(value.open) : update;
+      if (value.open === open) return;
+      const next = { ...value, open };
+      latest.current = next;
+      setState(next);
+    },
+    [scope],
+  );
   const fileClose = useRef(closeFile);
   fileClose.current = closeFile;
   const close = useRef(closeBrowser);
@@ -410,7 +446,6 @@ export function useSessionTabs(
       clearTimeout(timeout);
     };
   }, [scope, restoreAttempt, restoreKey, restoreEnabled]);
-  const { tabs, selected } = current;
   const active = tabs.some((tab) => tab.id === selected) ? selected : (tabs[0]?.id ?? '');
   // Apply each mutation immediately so requests in the same commit share the latest tabs.
   const update = (
@@ -579,6 +614,8 @@ export function useSessionTabs(
     if (result) void Promise.resolve(result).catch(failed);
   };
   return {
+    open,
+    setOpen,
     restoredBrowserId: current.restoredBrowserId,
     revealBrowserId: current.revealBrowserId,
     restoring: current.restoring || browserPending || restorePending,
